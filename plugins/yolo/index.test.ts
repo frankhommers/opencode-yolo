@@ -53,3 +53,16 @@ test("plugin-sourced messages are ignored", async () => {
 
   expect(sent).toHaveLength(0)
 })
+
+test("smoke: on -> question -> off flow", async () => {
+  const plugin = createYoloPlugin()
+  const { api, sent } = createApi()
+
+  await plugin.onMessage(api, { role: "user", text: "/yolo on" })
+  await plugin.onMessage(api, { id: "s-1", role: "assistant", text: "Can you decide?" })
+  await plugin.onMessage(api, { role: "user", text: "/yolo off" })
+  await plugin.onMessage(api, { id: "s-2", role: "assistant", text: "Should I continue?" })
+
+  expect(sent).toHaveLength(1)
+  expect(sent[0]).toEqual({ text: "You choose what's best", meta: { source: "yolo-plugin" } })
+})
