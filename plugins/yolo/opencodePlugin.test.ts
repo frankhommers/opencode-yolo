@@ -1,5 +1,16 @@
-import { createOpencodeYoloHooks, IDLE_DELAY_MS, HUMAN_TURN_TIMEOUT_MS } from "./opencodeCore"
+import { createOpencodeYoloHooks, IDLE_DELAY_MS, HUMAN_TURN_TIMEOUT_MS, type RuntimeDeps } from "./opencodeCore"
 import { DEFAULT_REPLY, PROCEED_REPLY } from "./isQuestion"
+
+function makeDeps(overrides: Partial<RuntimeDeps> = {}): RuntimeDeps {
+  return {
+    readMode: async () => "on",
+    writeMode: async () => {},
+    loadMessageText: async () => "",
+    sendUserMessage: async () => {},
+    answerQuestion: async () => {},
+    ...overrides,
+  }
+}
 
 function assistantCompleted(id: string, sessionID: string) {
   return {
@@ -38,14 +49,12 @@ afterEach(() => {
 
 test("/yolo on command enables mode", async () => {
   const writes: Array<"off" | "on" | "aggressive"> = []
-  const hooks = await createOpencodeYoloHooks({
+  const hooks = await createOpencodeYoloHooks(makeDeps({
     readMode: async () => "off",
     writeMode: async (mode: "off" | "on" | "aggressive") => {
       writes.push(mode)
     },
-    loadMessageText: async () => "",
-    sendUserMessage: async () => {},
-  })
+  }))
 
   await hooks["chat.message"]!(
     { sessionID: "s-1" },
@@ -61,14 +70,12 @@ test("/yolo on command enables mode", async () => {
 test("auto-reply sent after session.idle + delay", async () => {
   const sent: Array<{ sessionID: string; text: string }> = []
 
-  const hooks = await createOpencodeYoloHooks({
-    readMode: async () => "on",
-    writeMode: async () => {},
+  const hooks = await createOpencodeYoloHooks(makeDeps({
     loadMessageText: async () => "Should I continue?",
     sendUserMessage: async (sessionID: string, text: string) => {
       sent.push({ sessionID, text })
     },
-  })
+  }))
 
   // Assistant completes — classifies reply but does NOT send yet
   await hooks.event!(assistantCompleted("a-1", "s-2"))
@@ -87,9 +94,7 @@ test("auto-reply sent after session.idle + delay", async () => {
 test("auto-reply waits for a human turn before sending again", async () => {
   const sent: Array<{ sessionID: string; text: string }> = []
 
-  const hooks = await createOpencodeYoloHooks({
-    readMode: async () => "on",
-    writeMode: async () => {},
+  const hooks = await createOpencodeYoloHooks(makeDeps({
     loadMessageText: async (_sessionID: string, messageID: string) => {
       if (messageID === "a-1") return "Should I continue?"
       if (messageID === "a-2") return "Can you confirm?"
@@ -99,7 +104,7 @@ test("auto-reply waits for a human turn before sending again", async () => {
     sendUserMessage: async (sessionID: string, text: string) => {
       sent.push({ sessionID, text })
     },
-  })
+  }))
 
   // First assistant message → classify + idle + delay → sent
   await hooks.event!(assistantCompleted("a-1", "s-2"))
@@ -139,14 +144,12 @@ test("auto-reply waits for a human turn before sending again", async () => {
 test("sends OK Go for proceed-style assistant statements", async () => {
   const sent: Array<{ sessionID: string; text: string }> = []
 
-  const hooks = await createOpencodeYoloHooks({
-    readMode: async () => "on",
-    writeMode: async () => {},
+  const hooks = await createOpencodeYoloHooks(makeDeps({
     loadMessageText: async () => "I'll proceed with that approach and execute the plan task-by-task with checkpoints.",
     sendUserMessage: async (sessionID: string, text: string) => {
       sent.push({ sessionID, text })
     },
-  })
+  }))
 
   await hooks.event!(assistantCompleted("a-okgo", "s-okgo"))
   await hooks.event!(sessionIdle("s-okgo"))
@@ -157,14 +160,12 @@ test("sends OK Go for proceed-style assistant statements", async () => {
 
 test("command hook handles /yolo arguments", async () => {
   let mode: "off" | "on" | "aggressive" = "off"
-  const hooks = await createOpencodeYoloHooks({
+  const hooks = await createOpencodeYoloHooks(makeDeps({
     readMode: async () => mode,
     writeMode: async (next: "off" | "on" | "aggressive") => {
       mode = next
     },
-    loadMessageText: async () => "",
-    sendUserMessage: async () => {},
-  })
+  }))
 
   const output = { parts: [] as Array<{ type: string; text?: string }> }
   await hooks["command.execute.before"]!({ command: "yolo", sessionID: "s-cmd", arguments: "on" }, output)
@@ -175,14 +176,12 @@ test("command hook handles /yolo arguments", async () => {
 
 test("command hook handles /yolo aggressive", async () => {
   let mode: "off" | "on" | "aggressive" = "off"
-  const hooks = await createOpencodeYoloHooks({
+  const hooks = await createOpencodeYoloHooks(makeDeps({
     readMode: async () => mode,
     writeMode: async (next: "off" | "on" | "aggressive") => {
       mode = next
     },
-    loadMessageText: async () => "",
-    sendUserMessage: async () => {},
-  })
+  }))
 
   const output = { parts: [] as Array<{ type: string; text?: string }> }
   await hooks["command.execute.before"]!({ command: "yolo", sessionID: "s-cmd-2", arguments: "aggressive" }, output)
@@ -192,12 +191,9 @@ test("command hook handles /yolo aggressive", async () => {
 })
 
 test("denies bash yolo invocations", async () => {
-  const hooks = await createOpencodeYoloHooks({
+  const hooks = await createOpencodeYoloHooks(makeDeps({
     readMode: async () => "off",
-    writeMode: async () => {},
-    loadMessageText: async () => "",
-    sendUserMessage: async () => {},
-  })
+  }))
 
   await hooks["command.execute.before"]!(
     { command: "yolo", sessionID: "s-3", arguments: "status" },
@@ -249,12 +245,9 @@ test("denies bash yolo invocations", async () => {
 })
 
 test("denies task tool while /yolo command is active", async () => {
-  const hooks = await createOpencodeYoloHooks({
+  const hooks = await createOpencodeYoloHooks(makeDeps({
     readMode: async () => "off",
-    writeMode: async () => {},
-    loadMessageText: async () => "",
-    sendUserMessage: async () => {},
-  })
+  }))
 
   await hooks["command.execute.before"]!(
     { command: "yolo", sessionID: "s-4", arguments: "status" },
@@ -274,12 +267,9 @@ test("denies task tool while /yolo command is active", async () => {
 })
 
 test("rewrites bash execution to no-op while /yolo command is active", async () => {
-  const hooks = await createOpencodeYoloHooks({
+  const hooks = await createOpencodeYoloHooks(makeDeps({
     readMode: async () => "off",
-    writeMode: async () => {},
-    loadMessageText: async () => "",
-    sendUserMessage: async () => {},
-  })
+  }))
 
   await hooks["command.execute.before"]!(
     { command: "yolo", sessionID: "s-5", arguments: "status" },
@@ -305,14 +295,13 @@ test("rewrites bash execution to no-op while /yolo command is active", async () 
 test("aggressive mode asks continuation prompt for plain assistant updates", async () => {
   const sent: Array<{ sessionID: string; text: string }> = []
 
-  const hooks = await createOpencodeYoloHooks({
+  const hooks = await createOpencodeYoloHooks(makeDeps({
     readMode: async () => "aggressive",
-    writeMode: async () => {},
     loadMessageText: async () => "Ik heb de wijziging toegepast.",
     sendUserMessage: async (sessionID: string, text: string) => {
       sent.push({ sessionID, text })
     },
-  })
+  }))
 
   await hooks.event!(assistantCompleted("a-plain", "s-agg"))
   await hooks.event!(sessionIdle("s-agg"))
@@ -324,14 +313,12 @@ test("aggressive mode asks continuation prompt for plain assistant updates", asy
 test("human typing during delay cancels pending reply", async () => {
   const sent: Array<{ sessionID: string; text: string }> = []
 
-  const hooks = await createOpencodeYoloHooks({
-    readMode: async () => "on",
-    writeMode: async () => {},
+  const hooks = await createOpencodeYoloHooks(makeDeps({
     loadMessageText: async () => "Should I continue?",
     sendUserMessage: async (sessionID: string, text: string) => {
       sent.push({ sessionID, text })
     },
-  })
+  }))
 
   // Assistant completes + session idle starts timer
   await hooks.event!(assistantCompleted("a-cancel", "s-cancel"))
@@ -355,14 +342,12 @@ test("human typing during delay cancels pending reply", async () => {
 test("no reply sent without session.idle event", async () => {
   const sent: Array<{ sessionID: string; text: string }> = []
 
-  const hooks = await createOpencodeYoloHooks({
-    readMode: async () => "on",
-    writeMode: async () => {},
+  const hooks = await createOpencodeYoloHooks(makeDeps({
     loadMessageText: async () => "Should I continue?",
     sendUserMessage: async (sessionID: string, text: string) => {
       sent.push({ sessionID, text })
     },
-  })
+  }))
 
   // Only message.updated, no session.idle
   await hooks.event!(assistantCompleted("a-noidle", "s-noidle"))
@@ -371,17 +356,35 @@ test("no reply sent without session.idle event", async () => {
   expect(sent).toEqual([])
 })
 
-test("session.status busy cancels pending reply", async () => {
+test("self-schedules reply when session.idle fires before message.updated", async () => {
   const sent: Array<{ sessionID: string; text: string }> = []
 
-  const hooks = await createOpencodeYoloHooks({
-    readMode: async () => "on",
-    writeMode: async () => {},
+  const hooks = await createOpencodeYoloHooks(makeDeps({
     loadMessageText: async () => "Should I continue?",
     sendUserMessage: async (sessionID: string, text: string) => {
       sent.push({ sessionID, text })
     },
-  })
+  }))
+
+  // Reproduce the real OpenCode event ordering: idle fires BEFORE message.updated
+  await hooks.event!(sessionIdle("s-self"))
+  await hooks.event!(assistantCompleted("a-self", "s-self"))
+
+  // Self-timer should fire after IDLE_DELAY_MS
+  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
+
+  expect(sent).toEqual([{ sessionID: "s-self", text: DEFAULT_REPLY }])
+})
+
+test("session.status busy cancels pending reply", async () => {
+  const sent: Array<{ sessionID: string; text: string }> = []
+
+  const hooks = await createOpencodeYoloHooks(makeDeps({
+    loadMessageText: async () => "Should I continue?",
+    sendUserMessage: async (sessionID: string, text: string) => {
+      sent.push({ sessionID, text })
+    },
+  }))
 
   await hooks.event!(assistantCompleted("a-busy", "s-busy"))
 
@@ -403,14 +406,12 @@ test("session.status busy cancels pending reply", async () => {
 test("session.error suppresses next idle reply", async () => {
   const sent: Array<{ sessionID: string; text: string }> = []
 
-  const hooks = await createOpencodeYoloHooks({
-    readMode: async () => "on",
-    writeMode: async () => {},
+  const hooks = await createOpencodeYoloHooks(makeDeps({
     loadMessageText: async () => "Should I continue?",
     sendUserMessage: async (sessionID: string, text: string) => {
       sent.push({ sessionID, text })
     },
-  })
+  }))
 
   await hooks.event!(assistantCompleted("a-err", "s-err"))
 
@@ -432,9 +433,7 @@ test("session.error suppresses next idle reply", async () => {
 test("guard recovers after promptAsync delivery fails silently", async () => {
   const sent: Array<{ sessionID: string; text: string }> = []
 
-  const hooks = await createOpencodeYoloHooks({
-    readMode: async () => "on",
-    writeMode: async () => {},
+  const hooks = await createOpencodeYoloHooks(makeDeps({
     loadMessageText: async (_sid: string, mid: string) => {
       if (mid === "a-first") return "Should I continue?"
       if (mid === "a-second") return "What next?"
@@ -445,7 +444,7 @@ test("guard recovers after promptAsync delivery fails silently", async () => {
       sent.push({ sessionID, text })
       // Simulate promptAsync silently failing: no user message event arrives
     },
-  })
+  }))
 
   // First cycle: classify + idle + delay → sends reply
   await hooks.event!(assistantCompleted("a-first", "s-recover"))
@@ -472,4 +471,67 @@ test("guard recovers after promptAsync delivery fails silently", async () => {
 
   expect(sent).toHaveLength(2)
   expect(sent[1]).toEqual({ sessionID: "s-recover", text: DEFAULT_REPLY })
+})
+
+test("question.asked auto-answers with first option", async () => {
+  const answered: Array<{ requestID: string; answers: string[][] }> = []
+
+  const hooks = await createOpencodeYoloHooks(makeDeps({
+    readMode: async () => "on",
+    answerQuestion: async (requestID: string, answers: string[][]) => {
+      answered.push({ requestID, answers })
+    },
+  }))
+
+  await hooks.event!({
+    event: {
+      type: "question.asked",
+      properties: {
+        id: "q-1",
+        sessionID: "s-q1",
+        questions: [
+          {
+            question: "Which option?",
+            header: "Choose",
+            options: [
+              { label: "Option A", description: "First" },
+              { label: "Option B", description: "Second" },
+            ],
+          },
+        ],
+      } as any,
+    },
+  })
+
+  expect(answered).toEqual([{ requestID: "q-1", answers: [["Option A"]] }])
+})
+
+test("question.asked ignored when mode is off", async () => {
+  const answered: Array<{ requestID: string; answers: string[][] }> = []
+
+  const hooks = await createOpencodeYoloHooks(makeDeps({
+    readMode: async () => "off",
+    answerQuestion: async (requestID: string, answers: string[][]) => {
+      answered.push({ requestID, answers })
+    },
+  }))
+
+  await hooks.event!({
+    event: {
+      type: "question.asked",
+      properties: {
+        id: "q-2",
+        sessionID: "s-q2",
+        questions: [
+          {
+            question: "Which option?",
+            header: "Choose",
+            options: [{ label: "Option A", description: "First" }],
+          },
+        ],
+      } as any,
+    },
+  })
+
+  expect(answered).toEqual([])
 })

@@ -39,11 +39,26 @@ type ChatMessageOutput = {
   parts?: Array<{ type?: string; text?: string }>
 }
 
+export interface QuestionInfo {
+  question: string
+  header: string
+  options: Array<{ label: string; description: string }>
+  multiple?: boolean
+  custom?: boolean
+}
+
+export interface QuestionRequest {
+  id: string
+  sessionID: string
+  questions: QuestionInfo[]
+}
+
 export interface RuntimeDeps {
   readMode: () => Promise<YoloMode>
   writeMode: (mode: YoloMode) => Promise<void>
   loadMessageText: (sessionID: string, messageID: string) => Promise<string>
   sendUserMessage: (sessionID: string, text: string) => Promise<void>
+  answerQuestion: (requestID: string, answers: string[][]) => Promise<void>
 }
 
 export function textFromParts(parts: Array<{ type?: string; text?: string }> = []): string {
@@ -58,8 +73,18 @@ export const IDLE_DELAY_MS = 1000
 export const HUMAN_TURN_TIMEOUT_MS = 10_000
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000
 
+import { appendFileSync } from "node:fs"
+
+const YOLO_LOG_FILE = "/tmp/yolo-debug.log"
+
+function yoloLog(...args: unknown[]) {
+  const line = `${new Date().toISOString()} [YOLO] ${args.map(a => typeof a === "string" ? a : JSON.stringify(a)).join(" ")}\n`
+  try { appendFileSync(YOLO_LOG_FILE, line) } catch {}
+}
+
 export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
   let mode = await deps.readMode()
+  yoloLog("plugin loaded, mode:", mode)
 
   // --- Per-session state ---
   const waitingForHumanTurnBySession = new Set<string>()
@@ -73,6 +98,7 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
   const idleSequence = new Map<string, number>()
   const errorSuppressionAt = new Map<string, number>()
   const lastBusyAt = new Map<string, number>()
+  const lastIdleAt = new Map<string, number>()
   const humanTurnTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   // Memory cleanup: remove stale session entries every 5 minutes
@@ -179,18 +205,22 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
       input: { command: string; sessionID: string; arguments: string },
       output: { parts: Array<{ type: string; text?: string }> },
     ) => {
+      yoloLog("command.execute.before:", input.command, "args:", input.arguments)
       if (input.command !== "yolo") return
 
       activeYoloCommandSessions.add(input.sessionID)
 
       const args = input.arguments.trim()
       const commandText = args ? `/yolo ${args}` : "/yolo"
+      yoloLog("command.execute.before: calling maybeHandleYoloCommand with:", commandText)
       const result = await maybeHandleYoloCommand(commandText, {
         readMode: deps.readMode,
         writeMode: deps.writeMode,
       })
+      yoloLog("command.execute.before: result:", result.handled, result.mode)
       if (result.handled && result.mode) {
         mode = result.mode
+        yoloLog("command.execute.before: mode updated to:", mode)
       }
 
       const statusLine =
@@ -242,6 +272,7 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
     },
 
     "chat.message": async (_input: ChatMessageHook, output: ChatMessageOutput) => {
+      yoloLog("chat.message:", output.message?.role, textFromParts(output.parts)?.substring(0, 60))
       if (output.message?.role !== "user") return
 
       const sessionID = output.message.sessionID
@@ -257,17 +288,45 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
         writeMode: deps.writeMode,
       })
 
+      yoloLog("chat.message command result:", result.handled, result.mode)
       if (result.handled && result.mode) {
         mode = result.mode
+        yoloLog("chat.message updated mode to:", mode)
       }
     },
 
     event: async ({ event }: HookEvent) => {
+      yoloLog("event:", event.type, JSON.stringify(event.properties?.sessionID ?? event.properties?.info?.sessionID ?? "no-sid"))
+
       if (event.type === "command.executed") {
         const sessionID = event.properties?.sessionID
         const name = event.properties?.name
         if (name === "yolo" && sessionID) {
           activeYoloCommandSessions.delete(sessionID)
+        }
+        return
+      }
+
+      // question.asked: auto-answer multiple choice questions
+      if (event.type === "question.asked") {
+        if (mode === "off") return
+        const request = event.properties as unknown as QuestionRequest | undefined
+        if (!request?.id || !request?.questions?.length) return
+        yoloLog("question.asked:", request.id, "questions:", request.questions.length)
+
+        // For each question, pick the first option (or all if multiple)
+        const answers: string[][] = request.questions.map((q) => {
+          if (!q.options?.length) return []
+          if (q.multiple) return q.options.map((o) => o.label)
+          return [q.options[0].label]
+        })
+        yoloLog("question.asked: auto-answering with:", JSON.stringify(answers))
+
+        try {
+          await deps.answerQuestion(request.id, answers)
+          yoloLog("question.asked: answered", request.id)
+        } catch (err) {
+          yoloLog("question.asked: FAILED to answer", request.id, String(err))
         }
         return
       }
@@ -290,13 +349,17 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
       if (event.type === "session.idle") {
         const sessionID = event.properties?.sessionID
         if (!sessionID) return
+        lastIdleAt.set(sessionID, Date.now())
         const reply = pendingReplies.get(sessionID)
+        yoloLog("session.idle", sessionID, "pendingReply:", !!reply, "waitingForHuman:", waitingForHumanTurnBySession.has(sessionID))
         if (!reply) return
         if (waitingForHumanTurnBySession.has(sessionID)) {
+          yoloLog("session.idle BLOCKED by waitingForHumanTurn")
           cancelPendingReply(sessionID)
           return
         }
         if (shouldSuppressIdle(sessionID)) {
+          yoloLog("session.idle SUPPRESSED by error")
           cancelPendingReply(sessionID)
           return
         }
@@ -315,10 +378,12 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
           if (shouldSuppressIdle(sessionID)) return
           if (waitingForHumanTurnBySession.has(sessionID)) return
 
+          yoloLog("SENDING reply to", sessionID, pendingReply.substring(0, 40) + "...")
           waitingForHumanTurnBySession.add(sessionID)
           pendingSyntheticUserBySession.add(sessionID)
           startHumanTurnTimeout(sessionID)
           await deps.sendUserMessage(sessionID, pendingReply)
+          yoloLog("SENT reply to", sessionID)
         }, IDLE_DELAY_MS)
 
         idleTimers.set(sessionID, timer)
@@ -334,22 +399,54 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
         return
       }
 
-      if (mode === "off") return
+      if (mode === "off") { yoloLog("SKIP: mode off"); return }
       if (info.role !== "assistant") return
       if (!info.id) return
       if (!info.time?.completed) return
-      if (waitingForHumanTurnBySession.has(info.sessionID)) return
-      if (seenAssistantMessages.has(info.id)) return
+      if (waitingForHumanTurnBySession.has(info.sessionID)) { yoloLog("SKIP: waitingForHumanTurn", info.sessionID); return }
+      if (seenAssistantMessages.has(info.id)) { yoloLog("SKIP: already seen", info.id); return }
 
       seenAssistantMessages.add(info.id)
 
       const text = await deps.loadMessageText(info.sessionID, info.id)
       const classifiedReply = replyForAssistantText(text)
       const reply = classifiedReply ?? (mode === "aggressive" ? "What can we do now to reach the final result in the best way possible?" : undefined)
+      yoloLog("message.updated classified:", info.id, "reply:", reply ? reply.substring(0, 40) + "..." : "NONE", "mode:", mode)
       if (!reply) return
 
       // Store pending reply — will be sent on session.idle after delay
       pendingReplies.set(info.sessionID, reply)
+      yoloLog("pendingReply SET for", info.sessionID)
+
+      // session.idle may have already fired before this message.updated arrived
+      // (OpenCode delivers both in the same tick, idle first). Schedule the
+      // reply delivery ourselves if no idle timer is already pending BUT only
+      // if we recently saw session.idle (within 500ms) — otherwise the session
+      // may still be busy.
+      const recentIdle = lastIdleAt.get(info.sessionID)
+      const idleJustFired = recentIdle !== undefined && (Date.now() - recentIdle) < 500
+      if (!idleTimers.has(info.sessionID) && idleJustFired) {
+        yoloLog("scheduling self-timer for", info.sessionID, "(idle already passed)")
+        const sessionID = info.sessionID
+        const sequence = bumpSequence(sessionID)
+        const timer = setTimeout(async () => {
+          idleTimers.delete(sessionID)
+          if (!hasCurrentSequence(sessionID, sequence)) return
+          const pendingReply = pendingReplies.get(sessionID)
+          if (!pendingReply) return
+          pendingReplies.delete(sessionID)
+          if (shouldSuppressIdle(sessionID)) return
+          if (waitingForHumanTurnBySession.has(sessionID)) return
+
+          yoloLog("SENDING reply to", sessionID, pendingReply.substring(0, 40) + "...")
+          waitingForHumanTurnBySession.add(sessionID)
+          pendingSyntheticUserBySession.add(sessionID)
+          startHumanTurnTimeout(sessionID)
+          await deps.sendUserMessage(sessionID, pendingReply)
+          yoloLog("SENT reply to", sessionID)
+        }, IDLE_DELAY_MS)
+        idleTimers.set(sessionID, timer)
+      }
     },
   }
 }

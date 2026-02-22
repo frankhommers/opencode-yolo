@@ -43,4 +43,3 @@ export async function writeMode(mode: YoloMode, filePath = defaultStatePath()): 
   await fs.mkdir(path.dirname(filePath), { recursive: true })
   await fs.writeFile(filePath, JSON.stringify(modeToState(mode), null, 2), "utf8")
 }
-

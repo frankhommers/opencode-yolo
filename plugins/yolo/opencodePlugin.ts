@@ -14,7 +14,12 @@ export function resolveProjectStatePath(projectRoot: string) {
 }
 
 export default async function YoloPlugin(ctx: any) {
-  const statePath = resolveProjectStatePath(ctx.worktree || ctx.directory)
+  // ctx.worktree is "/" for non-git projects — always prefer ctx.directory
+  const projectRoot = ctx.directory || ctx.worktree
+  const statePath = resolveProjectStatePath(projectRoot)
+
+  // serverUrl for direct API calls (SDK v1 lacks question methods)
+  const serverUrl = ctx.serverUrl || "http://localhost:4096"
 
   return createOpencodeYoloHooks({
     readMode: () => readMode("off", statePath),
@@ -29,6 +34,16 @@ export default async function YoloPlugin(ctx: any) {
         path: { id: sessionID },
         body: buildSyntheticUserPrompt(text),
       })
+    },
+    answerQuestion: async (requestID: string, answers: string[][]) => {
+      const res = await fetch(`${serverUrl}/question/${requestID}/reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answers }),
+      })
+      if (!res.ok) {
+        throw new Error(`question.reply failed: ${res.status} ${await res.text()}`)
+      }
     },
   })
 }
