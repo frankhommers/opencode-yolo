@@ -1,2 +1,2 @@
 // Auto-generated — do not edit manually. Updated by scripts/update-version.sh
-export const VERSION = "92dae92"
+export const VERSION = "d1ff59f"

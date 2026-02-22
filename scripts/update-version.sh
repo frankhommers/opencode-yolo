@@ -12,7 +12,8 @@ cat > "$VERSION_FILE" <<EOF
 export const VERSION = "$COMMIT"
 EOF
 
-# Update version in command description
+# Update version in command description and body
 sed -i '' "s/— v[a-f0-9]\{7\}/— v$COMMIT/" "$COMMAND_FILE"
+sed -i '' "s/YOLO plugin (v[a-f0-9]\{7\})/YOLO plugin (v$COMMIT)/" "$COMMAND_FILE"
 
 echo "Updated version to $COMMIT"
