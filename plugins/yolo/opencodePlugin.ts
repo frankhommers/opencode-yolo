@@ -1,5 +1,5 @@
 import { createOpencodeYoloHooks, textFromParts } from "./opencodeCore"
-import { readEnabled, writeEnabled } from "./state"
+import { readMode, writeMode } from "./state"
 import path from "node:path"
 
 export function buildSyntheticUserPrompt(text: string) {
@@ -17,15 +17,15 @@ export default async function YoloPlugin(ctx: any) {
   const statePath = resolveProjectStatePath(ctx.worktree || ctx.directory)
 
   return createOpencodeYoloHooks({
-    readEnabled: () => readEnabled(false, statePath),
-    writeEnabled: (enabled: boolean) => writeEnabled(enabled, statePath),
+    readMode: () => readMode("off", statePath),
+    writeMode: (mode) => writeMode(mode, statePath),
     loadMessageText: async (sessionID: string, messageID: string) => {
       const result = await ctx.client.session.message({ path: { id: sessionID, messageID } })
       const parts = result?.data?.parts as Array<{ type?: string; text?: string }> | undefined
       return textFromParts(parts)
     },
     sendUserMessage: async (sessionID: string, text: string) => {
-      await ctx.client.session.prompt({
+      await ctx.client.session.promptAsync({
         path: { id: sessionID },
         body: buildSyntheticUserPrompt(text),
       })

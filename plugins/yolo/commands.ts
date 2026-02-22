@@ -1,18 +1,29 @@
-import { readEnabled, writeEnabled } from "./state"
+import { readMode, writeMode, type YoloMode } from "./state"
 
 export interface YoloCommandResult {
   handled: boolean
   enabled?: boolean
+  aggressive?: boolean
+  mode?: YoloMode
 }
 
 interface CommandDeps {
-  readEnabled: () => Promise<boolean>
-  writeEnabled: (enabled: boolean) => Promise<void>
+  readMode: () => Promise<YoloMode>
+  writeMode: (mode: YoloMode) => Promise<void>
 }
 
 const defaultDeps: CommandDeps = {
-  readEnabled: async () => readEnabled(),
-  writeEnabled,
+  readMode: async () => readMode(),
+  writeMode,
+}
+
+function resultForMode(mode: YoloMode): YoloCommandResult {
+  return {
+    handled: true,
+    enabled: mode !== "off",
+    aggressive: mode === "aggressive",
+    mode,
+  }
 }
 
 export async function maybeHandleYoloCommand(
@@ -22,24 +33,29 @@ export async function maybeHandleYoloCommand(
   const value = text.trim().toLowerCase()
 
   if (value === "/yolo") {
-    const current = await deps.readEnabled()
-    const next = !current
-    await deps.writeEnabled(next)
-    return { handled: true, enabled: next }
+    const current = await deps.readMode()
+    const next: YoloMode = current === "off" ? "on" : "off"
+    await deps.writeMode(next)
+    return resultForMode(next)
   }
 
   if (value === "/yolo on") {
-    await deps.writeEnabled(true)
-    return { handled: true, enabled: true }
+    await deps.writeMode("on")
+    return resultForMode("on")
+  }
+
+  if (value === "/yolo aggressive") {
+    await deps.writeMode("aggressive")
+    return resultForMode("aggressive")
   }
 
   if (value === "/yolo off") {
-    await deps.writeEnabled(false)
-    return { handled: true, enabled: false }
+    await deps.writeMode("off")
+    return resultForMode("off")
   }
 
   if (value === "/yolo status") {
-    return { handled: true, enabled: await deps.readEnabled() }
+    return resultForMode(await deps.readMode())
   }
 
   return { handled: false }

@@ -49,3 +49,7 @@ test("maps Dutch next logical step plan to OK Go", () => {
 test("maps Dutch 'als je go zegt' to OK Go", () => {
   expect(replyForAssistantText("Als je \"go\" zegt, pak ik stap 1 meteen.")).toBe("OK Go")
 })
+
+test("maps Dutch 'als dit akkoord is' to default yolo reply", () => {
+  expect(replyForAssistantText("Als dit akkoord is, ga ik verder met stap 2.")).toBe("You choose what's best")
+})

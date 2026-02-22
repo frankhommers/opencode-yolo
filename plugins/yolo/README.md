@@ -13,8 +13,11 @@ It only replies once per assistant message and ignores messages already sourced 
 ## Commands
 
 - Enable: `/yolo on`
+- Aggressive: `/yolo aggressive`
 - Disable: `/yolo off`
 - Status: `/yolo status`
+
+`aggressive` includes normal YOLO behavior and additionally posts `En nu?` for plain assistant updates.
 
 ## Config file
 

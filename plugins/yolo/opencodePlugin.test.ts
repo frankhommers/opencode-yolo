@@ -1,11 +1,46 @@
-import { createOpencodeYoloHooks } from "./opencodeCore"
+import { createOpencodeYoloHooks, IDLE_DELAY_MS } from "./opencodeCore"
+
+function assistantCompleted(id: string, sessionID: string) {
+  return {
+    event: {
+      type: "message.updated" as const,
+      properties: { info: { id, sessionID, role: "assistant", time: { completed: 1 } } },
+    },
+  }
+}
+
+function sessionIdle(sessionID: string) {
+  return {
+    event: {
+      type: "session.idle" as const,
+      properties: { sessionID },
+    },
+  }
+}
+
+function userMessageUpdated(id: string, sessionID: string) {
+  return {
+    event: {
+      type: "message.updated" as const,
+      properties: { info: { id, sessionID, role: "user" } },
+    },
+  }
+}
+
+beforeEach(() => {
+  vi.useFakeTimers()
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 test("/yolo on command enables mode", async () => {
-  const writes: boolean[] = []
+  const writes: Array<"off" | "on" | "aggressive"> = []
   const hooks = await createOpencodeYoloHooks({
-    readEnabled: async () => false,
-    writeEnabled: async (enabled: boolean) => {
-      writes.push(enabled)
+    readMode: async () => "off",
+    writeMode: async (mode: "off" | "on" | "aggressive") => {
+      writes.push(mode)
     },
     loadMessageText: async () => "",
     sendUserMessage: async () => {},
@@ -19,15 +54,41 @@ test("/yolo on command enables mode", async () => {
     },
   )
 
-  expect(writes).toEqual([true])
+  expect(writes).toEqual(["on"])
 })
 
-test("auto-reply waits for a human turn", async () => {
+test("auto-reply sent after session.idle + delay", async () => {
   const sent: Array<{ sessionID: string; text: string }> = []
 
   const hooks = await createOpencodeYoloHooks({
-    readEnabled: async () => true,
-    writeEnabled: async () => {},
+    readMode: async () => "on",
+    writeMode: async () => {},
+    loadMessageText: async () => "Should I continue?",
+    sendUserMessage: async (sessionID: string, text: string) => {
+      sent.push({ sessionID, text })
+    },
+  })
+
+  // Assistant completes — classifies reply but does NOT send yet
+  await hooks.event!(assistantCompleted("a-1", "s-2"))
+  expect(sent).toEqual([])
+
+  // Session goes idle — starts 1s timer
+  await hooks.event!(sessionIdle("s-2"))
+  expect(sent).toEqual([])
+
+  // Advance past delay
+  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
+
+  expect(sent).toEqual([{ sessionID: "s-2", text: "You choose what's best" }])
+})
+
+test("auto-reply waits for a human turn before sending again", async () => {
+  const sent: Array<{ sessionID: string; text: string }> = []
+
+  const hooks = await createOpencodeYoloHooks({
+    readMode: async () => "on",
+    writeMode: async () => {},
     loadMessageText: async (_sessionID: string, messageID: string) => {
       if (messageID === "a-1") return "Should I continue?"
       if (messageID === "a-2") return "Can you confirm?"
@@ -39,24 +100,22 @@ test("auto-reply waits for a human turn", async () => {
     },
   })
 
-  await hooks.event!({
-    event: {
-      type: "message.updated",
-      properties: { info: { id: "a-1", sessionID: "s-2", role: "assistant", time: { completed: 1 } } },
-    },
-  })
+  // First assistant message → classify + idle + delay → sent
+  await hooks.event!(assistantCompleted("a-1", "s-2"))
+  await hooks.event!(sessionIdle("s-2"))
+  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
+  expect(sent).toHaveLength(1)
 
-  await hooks.event!({
-    event: { type: "message.updated", properties: { info: { id: "u-synth", sessionID: "s-2", role: "user" } } },
-  })
+  // Synthetic user message arrives (from our reply)
+  await hooks.event!(userMessageUpdated("u-synth", "s-2"))
 
-  await hooks.event!({
-    event: {
-      type: "message.updated",
-      properties: { info: { id: "a-2", sessionID: "s-2", role: "assistant", time: { completed: 1 } } },
-    },
-  })
+  // Second assistant message while waiting for human — should be classified but blocked
+  await hooks.event!(assistantCompleted("a-2", "s-2"))
+  await hooks.event!(sessionIdle("s-2"))
+  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
+  expect(sent).toHaveLength(1) // still 1, blocked by waitingForHumanTurn
 
+  // Real human takes over
   await hooks["chat.message"]!(
     { sessionID: "s-2" },
     {
@@ -65,12 +124,10 @@ test("auto-reply waits for a human turn", async () => {
     },
   )
 
-  await hooks.event!({
-    event: {
-      type: "message.updated",
-      properties: { info: { id: "a-3", sessionID: "s-2", role: "assistant", time: { completed: 1 } } },
-    },
-  })
+  // Third assistant message after human took over — should work
+  await hooks.event!(assistantCompleted("a-3", "s-2"))
+  await hooks.event!(sessionIdle("s-2"))
+  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
 
   expect(sent).toEqual([
     { sessionID: "s-2", text: "You choose what's best" },
@@ -82,30 +139,27 @@ test("sends OK Go for proceed-style assistant statements", async () => {
   const sent: Array<{ sessionID: string; text: string }> = []
 
   const hooks = await createOpencodeYoloHooks({
-    readEnabled: async () => true,
-    writeEnabled: async () => {},
+    readMode: async () => "on",
+    writeMode: async () => {},
     loadMessageText: async () => "I'll proceed with that approach and execute the plan task-by-task with checkpoints.",
     sendUserMessage: async (sessionID: string, text: string) => {
       sent.push({ sessionID, text })
     },
   })
 
-  await hooks.event!({
-    event: {
-      type: "message.updated",
-      properties: { info: { id: "a-okgo", sessionID: "s-okgo", role: "assistant", time: { completed: 1 } } },
-    },
-  })
+  await hooks.event!(assistantCompleted("a-okgo", "s-okgo"))
+  await hooks.event!(sessionIdle("s-okgo"))
+  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
 
   expect(sent).toEqual([{ sessionID: "s-okgo", text: "OK Go" }])
 })
 
 test("command hook handles /yolo arguments", async () => {
-  let value = false
+  let mode: "off" | "on" | "aggressive" = "off"
   const hooks = await createOpencodeYoloHooks({
-    readEnabled: async () => value,
-    writeEnabled: async (enabled: boolean) => {
-      value = enabled
+    readMode: async () => mode,
+    writeMode: async (next: "off" | "on" | "aggressive") => {
+      mode = next
     },
     loadMessageText: async () => "",
     sendUserMessage: async () => {},
@@ -114,16 +168,32 @@ test("command hook handles /yolo arguments", async () => {
   const output = { parts: [] as Array<{ type: string; text?: string }> }
   await hooks["command.execute.before"]!({ command: "yolo", sessionID: "s-cmd", arguments: "on" }, output)
 
-  expect(value).toBe(true)
-  expect(output.parts).toEqual([
-    { type: "text", text: "YOLO mode enabled." },
-  ])
+  expect(mode).toBe("on")
+  expect(output.parts).toEqual([{ type: "text", text: "YOLO mode enabled: normal." }])
+})
+
+test("command hook handles /yolo aggressive", async () => {
+  let mode: "off" | "on" | "aggressive" = "off"
+  const hooks = await createOpencodeYoloHooks({
+    readMode: async () => mode,
+    writeMode: async (next: "off" | "on" | "aggressive") => {
+      mode = next
+    },
+    loadMessageText: async () => "",
+    sendUserMessage: async () => {},
+  })
+
+  const output = { parts: [] as Array<{ type: string; text?: string }> }
+  await hooks["command.execute.before"]!({ command: "yolo", sessionID: "s-cmd-2", arguments: "aggressive" }, output)
+
+  expect(mode).toBe("aggressive")
+  expect(output.parts).toEqual([{ type: "text", text: "YOLO mode enabled: aggressive." }])
 })
 
 test("denies bash yolo invocations", async () => {
   const hooks = await createOpencodeYoloHooks({
-    readEnabled: async () => false,
-    writeEnabled: async () => {},
+    readMode: async () => "off",
+    writeMode: async () => {},
     loadMessageText: async () => "",
     sendUserMessage: async () => {},
   })
@@ -179,8 +249,8 @@ test("denies bash yolo invocations", async () => {
 
 test("denies task tool while /yolo command is active", async () => {
   const hooks = await createOpencodeYoloHooks({
-    readEnabled: async () => false,
-    writeEnabled: async () => {},
+    readMode: async () => "off",
+    writeMode: async () => {},
     loadMessageText: async () => "",
     sendUserMessage: async () => {},
   })
@@ -204,8 +274,8 @@ test("denies task tool while /yolo command is active", async () => {
 
 test("rewrites bash execution to no-op while /yolo command is active", async () => {
   const hooks = await createOpencodeYoloHooks({
-    readEnabled: async () => false,
-    writeEnabled: async () => {},
+    readMode: async () => "off",
+    writeMode: async () => {},
     loadMessageText: async () => "",
     sendUserMessage: async () => {},
   })
@@ -229,4 +299,73 @@ test("rewrites bash execution to no-op while /yolo command is active", async () 
     command: ":",
     description: "No-op during yolo command",
   })
+})
+
+test("aggressive mode asks continuation prompt for plain assistant updates", async () => {
+  const sent: Array<{ sessionID: string; text: string }> = []
+
+  const hooks = await createOpencodeYoloHooks({
+    readMode: async () => "aggressive",
+    writeMode: async () => {},
+    loadMessageText: async () => "Ik heb de wijziging toegepast.",
+    sendUserMessage: async (sessionID: string, text: string) => {
+      sent.push({ sessionID, text })
+    },
+  })
+
+  await hooks.event!(assistantCompleted("a-plain", "s-agg"))
+  await hooks.event!(sessionIdle("s-agg"))
+  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
+
+  expect(sent).toEqual([{ sessionID: "s-agg", text: "What can we do now to reach the final result in the best way possible?" }])
+})
+
+test("human typing during delay cancels pending reply", async () => {
+  const sent: Array<{ sessionID: string; text: string }> = []
+
+  const hooks = await createOpencodeYoloHooks({
+    readMode: async () => "on",
+    writeMode: async () => {},
+    loadMessageText: async () => "Should I continue?",
+    sendUserMessage: async (sessionID: string, text: string) => {
+      sent.push({ sessionID, text })
+    },
+  })
+
+  // Assistant completes + session idle starts timer
+  await hooks.event!(assistantCompleted("a-cancel", "s-cancel"))
+  await hooks.event!(sessionIdle("s-cancel"))
+
+  // Human types before delay expires
+  await hooks["chat.message"]!(
+    { sessionID: "s-cancel" },
+    {
+      message: { id: "u-cancel", sessionID: "s-cancel", role: "user" },
+      parts: [{ type: "text", text: "actually, let me handle this" }],
+    },
+  )
+
+  // Timer fires but reply should be cancelled
+  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
+
+  expect(sent).toEqual([])
+})
+
+test("no reply sent without session.idle event", async () => {
+  const sent: Array<{ sessionID: string; text: string }> = []
+
+  const hooks = await createOpencodeYoloHooks({
+    readMode: async () => "on",
+    writeMode: async () => {},
+    loadMessageText: async () => "Should I continue?",
+    sendUserMessage: async (sessionID: string, text: string) => {
+      sent.push({ sessionID, text })
+    },
+  })
+
+  // Only message.updated, no session.idle
+  await hooks.event!(assistantCompleted("a-noidle", "s-noidle"))
+  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS * 5)
+
+  expect(sent).toEqual([])
 })

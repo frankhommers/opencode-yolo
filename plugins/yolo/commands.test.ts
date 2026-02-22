@@ -1,57 +1,71 @@
 import { maybeHandleYoloCommand } from "./commands"
 
 test("/yolo on enables mode and persists", async () => {
-  let value = false
+  let mode: "off" | "on" | "aggressive" = "off"
   const result = await maybeHandleYoloCommand("/yolo on", {
-    readEnabled: async () => value,
-    writeEnabled: async (enabled) => {
-      value = enabled
+    readMode: async () => mode,
+    writeMode: async (next) => {
+      mode = next
     },
   })
 
-  expect(result).toEqual({ handled: true, enabled: true })
-  expect(value).toBe(true)
+  expect(result).toEqual({ handled: true, enabled: true, aggressive: false, mode: "on" })
+  expect(mode).toBe("on")
 })
 
 test("/yolo off disables mode and persists", async () => {
-  let value = true
+  let mode: "off" | "on" | "aggressive" = "on"
   const result = await maybeHandleYoloCommand("/yolo off", {
-    readEnabled: async () => value,
-    writeEnabled: async (enabled) => {
-      value = enabled
+    readMode: async () => mode,
+    writeMode: async (next) => {
+      mode = next
     },
   })
 
-  expect(result).toEqual({ handled: true, enabled: false })
-  expect(value).toBe(false)
+  expect(result).toEqual({ handled: true, enabled: false, aggressive: false, mode: "off" })
+  expect(mode).toBe("off")
 })
 
 test("/yolo status returns current state", async () => {
   const result = await maybeHandleYoloCommand("/yolo status", {
-    readEnabled: async () => true,
-    writeEnabled: async () => {},
+    readMode: async () => "on",
+    writeMode: async () => {},
   })
 
-  expect(result).toEqual({ handled: true, enabled: true })
+  expect(result).toEqual({ handled: true, enabled: true, aggressive: false, mode: "on" })
 })
 
 test("/yolo toggles mode", async () => {
-  let value = false
+  let mode: "off" | "on" | "aggressive" = "off"
 
   const first = await maybeHandleYoloCommand("/yolo", {
-    readEnabled: async () => value,
-    writeEnabled: async (enabled) => {
-      value = enabled
+    readMode: async () => mode,
+    writeMode: async (next) => {
+      mode = next
     },
   })
 
   const second = await maybeHandleYoloCommand("/yolo", {
-    readEnabled: async () => value,
-    writeEnabled: async (enabled) => {
-      value = enabled
+    readMode: async () => mode,
+    writeMode: async (next) => {
+      mode = next
     },
   })
 
-  expect(first).toEqual({ handled: true, enabled: true })
-  expect(second).toEqual({ handled: true, enabled: false })
+  expect(first).toEqual({ handled: true, enabled: true, aggressive: false, mode: "on" })
+  expect(second).toEqual({ handled: true, enabled: false, aggressive: false, mode: "off" })
+})
+
+test("/yolo aggressive enables aggressive mode", async () => {
+  let mode: "off" | "on" | "aggressive" = "off"
+
+  const result = await maybeHandleYoloCommand("/yolo aggressive", {
+    readMode: async () => mode,
+    writeMode: async (next) => {
+      mode = next
+    },
+  })
+
+  expect(result).toEqual({ handled: true, enabled: true, aggressive: true, mode: "aggressive" })
+  expect(mode).toBe("aggressive")
 })

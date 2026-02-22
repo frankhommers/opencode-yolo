@@ -9,7 +9,11 @@ const OK_GO_PATTERNS = [
   /\bklaar\s+voor\s+feedback\b/i,
   /\bals\s+je\s+["'“”]?go["'“”]?\s+zegt\b/i,
 ]
-const SOFT_PERMISSION_PATTERNS = [/\bif\s+you\s+want\b/i, /\bif\s+you'?d\s+like\b/i]
+const SOFT_PERMISSION_PATTERNS = [
+  /\bif\s+you\s+want\b/i,
+  /\bif\s+you'?d\s+like\b/i,
+  /\bals\s+dit\s+akkoord\s+is\b/i,
+]
 const ACTION_REQUEST_PATTERNS = [
   /^(choose|pick|select|confirm|approve)\b/i,
   /^(kies|selecteer|bevestig|ga\s+verder|doe\s+maar)\b/i,

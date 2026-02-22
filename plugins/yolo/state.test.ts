@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { readEnabled, writeEnabled } from "./state"
+import { readEnabled, readMode, writeEnabled, writeMode } from "./state"
 
 test("default state path is project-local .yolo.json", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "yolo-state-cwd-"))
@@ -24,6 +24,19 @@ test("writeEnabled persists true", async () => {
 
   try {
     await writeEnabled(true, filePath)
+    await expect(readEnabled(false, filePath)).resolves.toBe(true)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("writeMode persists aggressive", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "yolo-state-"))
+  const filePath = path.join(dir, "yolo.json")
+
+  try {
+    await writeMode("aggressive", filePath)
+    await expect(readMode("off", filePath)).resolves.toBe("aggressive")
     await expect(readEnabled(false, filePath)).resolves.toBe(true)
   } finally {
     await rm(dir, { recursive: true, force: true })
