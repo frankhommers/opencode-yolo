@@ -1,7 +1,7 @@
 import { maybeHandleYoloCommand } from "./commands"
 import { replyForAssistantText } from "./isQuestion"
 import type { YoloMode } from "./state"
-import { VERSION } from "./version"
+
 
 type HookEvent = {
   event: {
@@ -193,13 +193,12 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
         mode = result.mode
       }
 
-      const modeLabel =
+      const statusLine =
         mode === "aggressive"
           ? "YOLO mode enabled: aggressive."
           : mode === "on"
             ? "YOLO mode enabled: normal."
             : "YOLO mode disabled."
-      const statusLine = `${modeLabel} (${VERSION})`
       output.parts = [
         {
           type: "text",
