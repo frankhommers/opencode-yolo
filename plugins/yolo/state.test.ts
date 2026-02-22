@@ -3,6 +3,21 @@ import os from "node:os"
 import path from "node:path"
 import { readEnabled, writeEnabled } from "./state"
 
+test("default state path is project-local .yolo.json", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "yolo-state-cwd-"))
+  const previousCwd = process.cwd()
+
+  try {
+    process.chdir(dir)
+    await writeEnabled(true)
+    await expect(readEnabled(false)).resolves.toBe(true)
+    await expect(readEnabled(false, path.join(dir, ".yolo.json"))).resolves.toBe(true)
+  } finally {
+    process.chdir(previousCwd)
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test("writeEnabled persists true", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "yolo-state-"))
   const filePath = path.join(dir, "yolo.json")

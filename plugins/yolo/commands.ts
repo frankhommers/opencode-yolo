@@ -21,6 +21,13 @@ export async function maybeHandleYoloCommand(
 ): Promise<YoloCommandResult> {
   const value = text.trim().toLowerCase()
 
+  if (value === "/yolo") {
+    const current = await deps.readEnabled()
+    const next = !current
+    await deps.writeEnabled(next)
+    return { handled: true, enabled: next }
+  }
+
   if (value === "/yolo on") {
     await deps.writeEnabled(true)
     return { handled: true, enabled: true }

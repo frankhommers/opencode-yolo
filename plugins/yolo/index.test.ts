@@ -1,4 +1,4 @@
-import { createYoloPlugin } from "./index"
+import { createYoloPlugin } from "./legacyPlugin"
 import type { ChatMessage, PluginApi } from "./types"
 
 test("plugin exposes name and handlers", () => {
@@ -65,4 +65,14 @@ test("smoke: on -> question -> off flow", async () => {
 
   expect(sent).toHaveLength(1)
   expect(sent[0]).toEqual({ text: "You choose what's best", meta: { source: "yolo-plugin" } })
+})
+
+test("does not auto-reply repeatedly without a human turn", async () => {
+  const plugin = createYoloPlugin({ initialEnabled: true })
+  const { api, sent } = createApi()
+
+  await plugin.onMessage(api, { id: "loop-1", role: "assistant", text: "What should I do?" })
+  await plugin.onMessage(api, { id: "loop-2", role: "assistant", text: "Can you clarify?" })
+
+  expect(sent).toEqual([{ text: "You choose what's best", meta: { source: "yolo-plugin" } }])
 })

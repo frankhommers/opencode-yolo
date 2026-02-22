@@ -1,14 +1,15 @@
 import { promises as fs } from "node:fs"
-import os from "node:os"
 import path from "node:path"
 
-const configPath = path.join(os.homedir(), ".config", "opencode", "plugins", "yolo.json")
+function defaultStatePath() {
+  return path.join(process.cwd(), ".yolo.json")
+}
 
 interface StateFile {
   enabled?: boolean
 }
 
-export async function readEnabled(defaultValue = false, filePath = configPath): Promise<boolean> {
+export async function readEnabled(defaultValue = false, filePath = defaultStatePath()): Promise<boolean> {
   try {
     const data = await fs.readFile(filePath, "utf8")
     const parsed = JSON.parse(data) as StateFile
@@ -18,7 +19,7 @@ export async function readEnabled(defaultValue = false, filePath = configPath): 
   }
 }
 
-export async function writeEnabled(enabled: boolean, filePath = configPath): Promise<void> {
+export async function writeEnabled(enabled: boolean, filePath = defaultStatePath()): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true })
   await fs.writeFile(filePath, JSON.stringify({ enabled }, null, 2), "utf8")
 }

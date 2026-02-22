@@ -1,0 +1,5 @@
+{
+  "name": "opencode-yolo-plugin",
+  "type": "module",
+  "module": "opencodePlugin.ts"
+}

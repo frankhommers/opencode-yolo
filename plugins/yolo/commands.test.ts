@@ -34,3 +34,24 @@ test("/yolo status returns current state", async () => {
 
   expect(result).toEqual({ handled: true, enabled: true })
 })
+
+test("/yolo toggles mode", async () => {
+  let value = false
+
+  const first = await maybeHandleYoloCommand("/yolo", {
+    readEnabled: async () => value,
+    writeEnabled: async (enabled) => {
+      value = enabled
+    },
+  })
+
+  const second = await maybeHandleYoloCommand("/yolo", {
+    readEnabled: async () => value,
+    writeEnabled: async (enabled) => {
+      value = enabled
+    },
+  })
+
+  expect(first).toEqual({ handled: true, enabled: true })
+  expect(second).toEqual({ handled: true, enabled: false })
+})
