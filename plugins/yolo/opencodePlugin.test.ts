@@ -1,5 +1,5 @@
 import { createOpencodeYoloHooks, IDLE_DELAY_MS, HUMAN_TURN_TIMEOUT_MS, type RuntimeDeps } from "./opencodeCore"
-import { DEFAULT_REPLY, PROCEED_REPLY } from "./isQuestion"
+import { DEFAULT_REPLY, PROCEED_REPLY, AGGRESSIVE_FALLBACK } from "./isQuestion"
 
 function makeDeps(overrides: Partial<RuntimeDeps> = {}): RuntimeDeps {
   return {
@@ -534,4 +534,49 @@ test("question.asked ignored when mode is off", async () => {
   })
 
   expect(answered).toEqual([])
+})
+
+test("/yolo start sends prompt without changing mode", async () => {
+  const sent: Array<{ sessionID: string; text: string }> = []
+
+  const hooks = await createOpencodeYoloHooks(makeDeps({
+    readMode: async () => "aggressive",
+    sendUserMessage: async (sessionID: string, text: string) => {
+      sent.push({ sessionID, text })
+    },
+  }))
+
+  const output = { parts: [] as any[] }
+  await hooks["command.execute.before"]!(
+    { command: "yolo", sessionID: "s-start", arguments: "start" },
+    output,
+  )
+
+  // Timer fires after IDLE_DELAY_MS
+  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
+
+  expect(sent).toEqual([{ sessionID: "s-start", text: AGGRESSIVE_FALLBACK }])
+  expect(output.parts[0].text).toBe("YOLO: kicking off work.")
+})
+
+test("/yolo start does nothing when mode is off", async () => {
+  const sent: Array<{ sessionID: string; text: string }> = []
+
+  const hooks = await createOpencodeYoloHooks(makeDeps({
+    readMode: async () => "off",
+    sendUserMessage: async (sessionID: string, text: string) => {
+      sent.push({ sessionID, text })
+    },
+  }))
+
+  const output = { parts: [] as any[] }
+  await hooks["command.execute.before"]!(
+    { command: "yolo", sessionID: "s-start-off", arguments: "start" },
+    output,
+  )
+
+  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS * 5)
+
+  expect(sent).toEqual([])
+  expect(output.parts[0].text).toContain("off")
 })

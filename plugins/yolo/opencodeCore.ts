@@ -1,5 +1,5 @@
 import { maybeHandleYoloCommand } from "./commands"
-import { replyForAssistantText } from "./isQuestion"
+import { replyForAssistantText, AGGRESSIVE_FALLBACK } from "./isQuestion"
 import type { YoloMode } from "./state"
 
 
@@ -210,7 +210,36 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
 
       activeYoloCommandSessions.add(input.sessionID)
 
-      const args = input.arguments.trim()
+      const args = input.arguments.trim().toLowerCase()
+
+      // /yolo start: send the go-to-work prompt without changing mode
+      if (args === "start") {
+        if (mode === "off") {
+          output.parts = [{ type: "text", text: "YOLO mode is off. Enable it first with /yolo on or /yolo aggressive." }]
+          return
+        }
+        yoloLog("command /yolo start: sending prompt to", input.sessionID)
+        pendingReplies.set(input.sessionID, AGGRESSIVE_FALLBACK)
+        const sequence = bumpSequence(input.sessionID)
+        const sessionID = input.sessionID
+        const timer = setTimeout(async () => {
+          idleTimers.delete(sessionID)
+          if (!hasCurrentSequence(sessionID, sequence)) return
+          const pendingReply = pendingReplies.get(sessionID)
+          if (!pendingReply) return
+          pendingReplies.delete(sessionID)
+          yoloLog("SENDING start reply to", sessionID)
+          waitingForHumanTurnBySession.add(sessionID)
+          pendingSyntheticUserBySession.add(sessionID)
+          startHumanTurnTimeout(sessionID)
+          await deps.sendUserMessage(sessionID, pendingReply)
+          yoloLog("SENT start reply to", sessionID)
+        }, IDLE_DELAY_MS)
+        idleTimers.set(sessionID, timer)
+        output.parts = [{ type: "text", text: "YOLO: kicking off work." }]
+        return
+      }
+
       const commandText = args ? `/yolo ${args}` : "/yolo"
       yoloLog("command.execute.before: calling maybeHandleYoloCommand with:", commandText)
       const result = await maybeHandleYoloCommand(commandText, {
@@ -410,7 +439,7 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
 
       const text = await deps.loadMessageText(info.sessionID, info.id)
       const classifiedReply = replyForAssistantText(text)
-      const reply = classifiedReply ?? (mode === "aggressive" ? "What can we do now to reach the final result in the best way possible?" : undefined)
+      const reply = classifiedReply ?? (mode === "aggressive" ? AGGRESSIVE_FALLBACK : undefined)
       yoloLog("message.updated classified:", info.id, "reply:", reply ? reply.substring(0, 40) + "..." : "NONE", "mode:", mode)
       if (!reply) return
 

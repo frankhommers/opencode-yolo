@@ -27,6 +27,7 @@ export function isQuestion(text: string): boolean {
 
 export const PROCEED_REPLY = "Please execute it, so that we reach the final result in the best way possible. Just execute don't ask."
 export const DEFAULT_REPLY = "You choose what's best and please execute it so that we reach the final result in the best way possible. Just execute, don't ask."
+export const AGGRESSIVE_FALLBACK = "What can we do now to reach the final result in the best way possible?"
 
 export function replyForAssistantText(text: string): string | undefined {
   const value = text.trim()

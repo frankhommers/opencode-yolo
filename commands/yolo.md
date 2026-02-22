@@ -4,7 +4,7 @@ description: "Toggle or inspect YOLO mode (on/off/aggressive/status) — vf72a26
 subtask: false
 arguments:
   - name: action
-    description: "One of: on, aggressive, off, status"
+    description: "One of: on, aggressive, off, status, start"
     required: false
 ---
 
