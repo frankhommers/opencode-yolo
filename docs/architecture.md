@@ -53,6 +53,7 @@ Multiple guards prevent infinite reply loops and handle edge cases:
 - **`errorSuppressionAt`** — Per-session timestamp. Set on `session.error`. The next `session.idle` is suppressed (no auto-reply after an error).
 - **`lastBusyAt`** — Per-session timestamp. Set on `session.status` busy. Cancels pending replies and bumps sequence. If a busy event occurs after an error, the error suppression is cleared.
 - **Memory cleanup** — Interval (every 5 minutes) removes stale entries from `idleSequence`, `errorSuppressionAt`, and `lastBusyAt` to prevent memory leaks in long-running sessions.
+- **`humanTurnTimers`** — Per-session recovery timer (10 seconds). Started after sending a synthetic reply. If no user message event arrives within 10 seconds (because `promptAsync` silently failed), the `waitingForHumanTurn` and `pendingSyntheticUser` guards are force-cleared so the plugin resumes auto-replying.
 
 ### Human takeover
 

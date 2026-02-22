@@ -54,6 +54,7 @@ export function textFromParts(parts: Array<{ type?: string; text?: string }> = [
 }
 
 export const IDLE_DELAY_MS = 1000
+export const HUMAN_TURN_TIMEOUT_MS = 10_000
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000
 
 export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
@@ -71,6 +72,7 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
   const idleSequence = new Map<string, number>()
   const errorSuppressionAt = new Map<string, number>()
   const lastBusyAt = new Map<string, number>()
+  const humanTurnTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   // Memory cleanup: remove stale session entries every 5 minutes
   const cleanupTimer = setInterval(() => {
@@ -142,8 +144,28 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
     return true
   }
 
+  function clearHumanTurnTimer(sessionID: string) {
+    const timer = humanTurnTimers.get(sessionID)
+    if (timer) {
+      clearTimeout(timer)
+      humanTurnTimers.delete(sessionID)
+    }
+  }
+
+  function startHumanTurnTimeout(sessionID: string) {
+    clearHumanTurnTimer(sessionID)
+    const timer = setTimeout(() => {
+      humanTurnTimers.delete(sessionID)
+      // promptAsync delivery failed silently — force-clear guards so plugin resumes
+      waitingForHumanTurnBySession.delete(sessionID)
+      pendingSyntheticUserBySession.delete(sessionID)
+    }, HUMAN_TURN_TIMEOUT_MS)
+    humanTurnTimers.set(sessionID, timer)
+  }
+
   function humanTookOver(sessionID: string) {
     cancelPendingReply(sessionID)
+    clearHumanTurnTimer(sessionID)
     if (pendingSyntheticUserBySession.has(sessionID)) {
       pendingSyntheticUserBySession.delete(sessionID)
     } else {
@@ -294,6 +316,7 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
 
           waitingForHumanTurnBySession.add(sessionID)
           pendingSyntheticUserBySession.add(sessionID)
+          startHumanTurnTimeout(sessionID)
           await deps.sendUserMessage(sessionID, pendingReply)
         }, IDLE_DELAY_MS)
 

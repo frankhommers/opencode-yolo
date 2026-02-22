@@ -1,4 +1,4 @@
-import { createOpencodeYoloHooks, IDLE_DELAY_MS } from "./opencodeCore"
+import { createOpencodeYoloHooks, IDLE_DELAY_MS, HUMAN_TURN_TIMEOUT_MS } from "./opencodeCore"
 import { DEFAULT_REPLY, PROCEED_REPLY } from "./isQuestion"
 
 function assistantCompleted(id: string, sessionID: string) {
@@ -427,4 +427,49 @@ test("session.error suppresses next idle reply", async () => {
   await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
 
   expect(sent).toEqual([])
+})
+
+test("guard recovers after promptAsync delivery fails silently", async () => {
+  const sent: Array<{ sessionID: string; text: string }> = []
+
+  const hooks = await createOpencodeYoloHooks({
+    readMode: async () => "on",
+    writeMode: async () => {},
+    loadMessageText: async (_sid: string, mid: string) => {
+      if (mid === "a-first") return "Should I continue?"
+      if (mid === "a-second") return "What next?"
+      if (mid === "a-third") return "Can you confirm?"
+      return ""
+    },
+    sendUserMessage: async (sessionID: string, text: string) => {
+      sent.push({ sessionID, text })
+      // Simulate promptAsync silently failing: no user message event arrives
+    },
+  })
+
+  // First cycle: classify + idle + delay → sends reply
+  await hooks.event!(assistantCompleted("a-first", "s-recover"))
+  await hooks.event!(sessionIdle("s-recover"))
+  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
+  expect(sent).toHaveLength(1)
+
+  // No user message event arrives (promptAsync failed silently)
+  // Second assistant message arrives — blocked by waitingForHumanTurn
+  await hooks.event!(assistantCompleted("a-second", "s-recover"))
+  await hooks.event!(sessionIdle("s-recover"))
+  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
+  expect(sent).toHaveLength(1) // still blocked
+
+  // After HUMAN_TURN_TIMEOUT_MS, guard auto-clears
+  await vi.advanceTimersByTimeAsync(HUMAN_TURN_TIMEOUT_MS)
+
+  // Now a new assistant message should work again
+  await hooks.event!(assistantCompleted("a-third", "s-recover"))
+
+  // session.idle triggers send after delay
+  await hooks.event!(sessionIdle("s-recover"))
+  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS + 100)
+
+  expect(sent).toHaveLength(2)
+  expect(sent[1]).toEqual({ sessionID: "s-recover", text: DEFAULT_REPLY })
 })
