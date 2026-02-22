@@ -1,5 +1,6 @@
 import { createOpencodeYoloHooks, IDLE_DELAY_MS, HUMAN_TURN_TIMEOUT_MS } from "./opencodeCore"
 import { DEFAULT_REPLY, PROCEED_REPLY } from "./isQuestion"
+import { VERSION } from "./version"
 
 function assistantCompleted(id: string, sessionID: string) {
   return {
@@ -170,7 +171,7 @@ test("command hook handles /yolo arguments", async () => {
   await hooks["command.execute.before"]!({ command: "yolo", sessionID: "s-cmd", arguments: "on" }, output)
 
   expect(mode).toBe("on")
-  expect(output.parts).toEqual([{ type: "text", text: "YOLO mode enabled: normal." }])
+  expect(output.parts).toEqual([{ type: "text", text: `YOLO mode enabled: normal. (${VERSION})` }])
 })
 
 test("command hook handles /yolo aggressive", async () => {
@@ -188,7 +189,7 @@ test("command hook handles /yolo aggressive", async () => {
   await hooks["command.execute.before"]!({ command: "yolo", sessionID: "s-cmd-2", arguments: "aggressive" }, output)
 
   expect(mode).toBe("aggressive")
-  expect(output.parts).toEqual([{ type: "text", text: "YOLO mode enabled: aggressive." }])
+  expect(output.parts).toEqual([{ type: "text", text: `YOLO mode enabled: aggressive. (${VERSION})` }])
 })
 
 test("denies bash yolo invocations", async () => {
