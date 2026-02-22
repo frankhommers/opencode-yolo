@@ -1,6 +1,6 @@
 import type { ChatMessage, PluginApi } from "./types"
 import { maybeHandleYoloCommand } from "./commands"
-import { isQuestion } from "./isQuestion"
+import { isQuestion, DEFAULT_REPLY } from "./isQuestion"
 import { createReplyGuard } from "./replyGuard"
 
 interface CreateYoloPluginOptions {
@@ -38,7 +38,7 @@ export function createYoloPlugin(options: CreateYoloPluginOptions = {}) {
       if (guard.hasSeen(message)) return
 
       waitingForHumanTurn = true
-      await api.sendUserMessage("You choose what's best", { source: "yolo-plugin" })
+      await api.sendUserMessage(DEFAULT_REPLY, { source: "yolo-plugin" })
       guard.markSeen(message)
     },
   }

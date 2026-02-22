@@ -25,12 +25,15 @@ export function isQuestion(text: string): boolean {
   return value.includes("?") || STARTERS.test(value)
 }
 
+export const PROCEED_REPLY = "Please execute it, so that we reach the final result in the best way possible. Just execute don't ask."
+export const DEFAULT_REPLY = "You choose what's best and please execute it so that we reach the final result in the best way possible. Just execute, don't ask."
+
 export function replyForAssistantText(text: string): string | undefined {
   const value = text.trim()
   if (!value) return
-  if (OK_GO_PATTERNS.some((pattern) => pattern.test(value))) return "OK Go"
-  if (isQuestion(value)) return "You choose what's best"
-  if (ACTION_REQUEST_PATTERNS.some((pattern) => pattern.test(value))) return "You choose what's best"
-  if (SOFT_PERMISSION_PATTERNS.some((pattern) => pattern.test(value))) return "You choose what's best"
+  if (OK_GO_PATTERNS.some((pattern) => pattern.test(value))) return PROCEED_REPLY
+  if (isQuestion(value)) return DEFAULT_REPLY
+  if (ACTION_REQUEST_PATTERNS.some((pattern) => pattern.test(value))) return DEFAULT_REPLY
+  if (SOFT_PERMISSION_PATTERNS.some((pattern) => pattern.test(value))) return DEFAULT_REPLY
   return
 }

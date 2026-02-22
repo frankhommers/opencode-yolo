@@ -18,6 +18,9 @@ type HookEvent = {
       sessionID?: string
       arguments?: string
       messageID?: string
+      status?: {
+        type?: string
+      }
     }
   }
 }
@@ -51,23 +54,92 @@ export function textFromParts(parts: Array<{ type?: string; text?: string }> = [
 }
 
 export const IDLE_DELAY_MS = 1000
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000
 
 export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
   let mode = await deps.readMode()
+
+  // --- Per-session state ---
   const waitingForHumanTurnBySession = new Set<string>()
   const seenAssistantMessages = new Set<string>()
   const pendingSyntheticUserBySession = new Set<string>()
   const activeYoloCommandSessions = new Set<string>()
+
+  // --- Idle scheduling (notifier pattern) ---
   const pendingReplies = new Map<string, string>()
   const idleTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const idleSequence = new Map<string, number>()
+  const errorSuppressionAt = new Map<string, number>()
+  const lastBusyAt = new Map<string, number>()
 
-  function cancelPendingReply(sessionID: string) {
-    pendingReplies.delete(sessionID)
+  // Memory cleanup: remove stale session entries every 5 minutes
+  const cleanupTimer = setInterval(() => {
+    const cutoff = Date.now() - CLEANUP_INTERVAL_MS
+    for (const [sessionID] of idleSequence) {
+      if (!idleTimers.has(sessionID)) {
+        idleSequence.delete(sessionID)
+      }
+    }
+    for (const [sessionID, timestamp] of errorSuppressionAt) {
+      if (timestamp < cutoff) errorSuppressionAt.delete(sessionID)
+    }
+    for (const [sessionID, timestamp] of lastBusyAt) {
+      if (timestamp < cutoff) lastBusyAt.delete(sessionID)
+    }
+  }, CLEANUP_INTERVAL_MS)
+
+  // Allow GC if the plugin is unloaded (Node won't hold the process open)
+  if (typeof cleanupTimer === "object" && cleanupTimer !== null && "unref" in (cleanupTimer as any)) {
+    ;(cleanupTimer as any).unref()
+  }
+
+  function bumpSequence(sessionID: string): number {
+    const next = (idleSequence.get(sessionID) ?? 0) + 1
+    idleSequence.set(sessionID, next)
+    return next
+  }
+
+  function hasCurrentSequence(sessionID: string, seq: number): boolean {
+    return idleSequence.get(sessionID) === seq
+  }
+
+  function clearIdleTimer(sessionID: string) {
     const timer = idleTimers.get(sessionID)
     if (timer) {
       clearTimeout(timer)
       idleTimers.delete(sessionID)
     }
+  }
+
+  function cancelPendingReply(sessionID: string) {
+    pendingReplies.delete(sessionID)
+    bumpSequence(sessionID)
+    clearIdleTimer(sessionID)
+  }
+
+  function markBusy(sessionID: string) {
+    lastBusyAt.set(sessionID, Date.now())
+    errorSuppressionAt.delete(sessionID)
+    cancelPendingReply(sessionID)
+  }
+
+  function markError(sessionID: string) {
+    errorSuppressionAt.set(sessionID, Date.now())
+    cancelPendingReply(sessionID)
+  }
+
+  function shouldSuppressIdle(sessionID: string): boolean {
+    const errorAt = errorSuppressionAt.get(sessionID)
+    if (errorAt === undefined) return false
+
+    const busyAt = lastBusyAt.get(sessionID)
+    if (typeof busyAt === "number" && busyAt > errorAt) {
+      errorSuppressionAt.delete(sessionID)
+      return false
+    }
+
+    errorSuppressionAt.delete(sessionID)
+    return true
   }
 
   function humanTookOver(sessionID: string) {
@@ -177,7 +249,21 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
         return
       }
 
-      // session.idle: send pending reply after delay
+      // session.status busy: cancel pending reply, bump sequence
+      if (event.type === "session.status" && event.properties?.status?.type === "busy") {
+        const sessionID = event.properties?.sessionID
+        if (sessionID) markBusy(sessionID)
+        return
+      }
+
+      // session.error: suppress next idle for this session
+      if (event.type === "session.error") {
+        const sessionID = event.properties?.sessionID
+        if (sessionID) markError(sessionID)
+        return
+      }
+
+      // session.idle: send pending reply after delay (with sequence guard)
       if (event.type === "session.idle") {
         const sessionID = event.properties?.sessionID
         if (!sessionID) return
@@ -187,18 +273,23 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
           cancelPendingReply(sessionID)
           return
         }
+        if (shouldSuppressIdle(sessionID)) {
+          cancelPendingReply(sessionID)
+          return
+        }
 
-        // Cancel any existing timer for this session (dedup)
-        const existingTimer = idleTimers.get(sessionID)
-        if (existingTimer) clearTimeout(existingTimer)
+        clearIdleTimer(sessionID)
+        const sequence = bumpSequence(sessionID)
 
         const timer = setTimeout(async () => {
           idleTimers.delete(sessionID)
+          if (!hasCurrentSequence(sessionID, sequence)) return
+
           const pendingReply = pendingReplies.get(sessionID)
           if (!pendingReply) return
           pendingReplies.delete(sessionID)
 
-          // Re-check: human might have typed during the delay
+          if (shouldSuppressIdle(sessionID)) return
           if (waitingForHumanTurnBySession.has(sessionID)) return
 
           waitingForHumanTurnBySession.add(sessionID)
