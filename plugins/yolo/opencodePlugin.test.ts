@@ -339,7 +339,7 @@ test("human typing during delay cancels pending reply", async () => {
   expect(sent).toEqual([])
 })
 
-test("no reply sent without session.idle event", async () => {
+test("reply sent even without session.idle (self-scheduled)", async () => {
   const sent: Array<{ sessionID: string; text: string }> = []
 
   const hooks = await createOpencodeYoloHooks(makeDeps({
@@ -349,11 +349,11 @@ test("no reply sent without session.idle event", async () => {
     },
   }))
 
-  // Only message.updated, no session.idle
+  // Only message.updated, no session.idle — reply should still be sent
   await hooks.event!(assistantCompleted("a-noidle", "s-noidle"))
-  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS * 5)
+  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
 
-  expect(sent).toEqual([])
+  expect(sent).toEqual([{ sessionID: "s-noidle", text: DEFAULT_REPLY }])
 })
 
 test("self-schedules reply when session.idle fires before message.updated", async () => {
