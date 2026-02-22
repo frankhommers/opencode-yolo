@@ -44,10 +44,3 @@ export async function writeMode(mode: YoloMode, filePath = defaultStatePath()): 
   await fs.writeFile(filePath, JSON.stringify(modeToState(mode), null, 2), "utf8")
 }
 
-export async function readEnabled(defaultValue = false, filePath = defaultStatePath()): Promise<boolean> {
-  return (await readMode(defaultValue ? "on" : "off", filePath)) !== "off"
-}
-
-export async function writeEnabled(enabled: boolean, filePath = defaultStatePath()): Promise<void> {
-  await writeMode(enabled ? "on" : "off", filePath)
-}

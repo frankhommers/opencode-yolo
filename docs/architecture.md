@@ -96,18 +96,15 @@ Wires the runtime dependencies:
 plugins/yolo/
   opencodeCore.ts        — Hook logic (event, chat.message, command, permission, tool)
   opencodePlugin.ts      — Plugin entry point, wires runtime deps
-  isQuestion.ts          — Text classification (EN + NL patterns)
+  isQuestion.ts          — Text classification (EN + NL patterns), reply constants
   commands.ts            — /yolo command parser
   state.ts               — .yolo.json read/write
-  legacyPlugin.ts        — Old non-OpenCode plugin (kept for test compat)
   index.ts               — Re-exports opencodePlugin as default
 
-  opencodePlugin.test.ts — Hook behavior tests (session.idle delay, guards, commands)
-  isQuestion.test.ts     — Classifier tests
+  opencodePlugin.test.ts — Hook behavior tests (idle delay, guards, busy/error suppression)
+  isQuestion.test.ts     — Classifier tests (EN + NL)
   commands.test.ts       — Command parsing tests
   state.test.ts          — State persistence tests
-  index.test.ts          — Legacy plugin tests
-  replyGuard.test.ts     — Reply guard tests
   opencodePlugin.runtime.test.ts — Runtime helpers tests
 ```
 
@@ -115,7 +112,7 @@ plugins/yolo/
 
 | Hook | Purpose |
 |------|---------|
-| `event` | Listens for `message.updated`, `session.idle`, `command.executed` |
+| `event` | Listens for `message.updated`, `session.idle`, `session.status`, `session.error`, `command.executed` |
 | `chat.message` | Detects user messages (human takeover), handles `/yolo` as text |
 | `command.execute.before` | Handles `/yolo` slash command, sets output text |
 | `permission.ask` | Denies bash `yolo` calls and all tools during command execution |
