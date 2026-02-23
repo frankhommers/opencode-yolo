@@ -208,6 +208,7 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
     if (!pendingReply) { yoloLog("DELIVER SKIP: no pendingReply", sessionID); return }
     pendingReplies.delete(sessionID)
     pendingReplySetAt.delete(sessionID)
+    if (mode === "off") { yoloLog("DELIVER SKIP: mode is off", sessionID); return }
     if (shouldSuppressIdle(sessionID)) { yoloLog("DELIVER SKIP: error suppression", sessionID); return }
     if (waitingForHumanTurnBySession.has(sessionID)) { yoloLog("DELIVER SKIP: waitingForHumanTurn", sessionID); return }
 

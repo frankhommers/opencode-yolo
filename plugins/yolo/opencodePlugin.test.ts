@@ -685,3 +685,69 @@ test("watchdog respects waitingForHumanTurn guard", async () => {
 
   expect(sent).toHaveLength(1) // still only the first reply
 })
+
+test("delivery aborted when mode switched to off before idle fires", async () => {
+  const sent: Array<{ sessionID: string; text: string }> = []
+  let currentMode: "off" | "on" | "aggressive" = "on"
+
+  const hooks = await createOpencodeYoloHooks(makeDeps({
+    readMode: async () => currentMode,
+    writeMode: async (m: "off" | "on" | "aggressive") => { currentMode = m },
+    loadMessageText: async () => "Should I continue?",
+    sendUserMessage: async (sessionID: string, text: string) => {
+      sent.push({ sessionID, text })
+    },
+  }))
+
+  // Assistant completes — stores pending reply
+  await hooks.event!(assistantCompleted("a-off", "s-off"))
+  expect(sent).toEqual([])
+
+  // User turns yolo off before delivery
+  await hooks["command.execute.before"]!(
+    { command: "yolo", sessionID: "s-off", arguments: "off" },
+    { parts: [] },
+  )
+
+  // Now idle fires + timer — should NOT deliver because mode is off
+  await hooks.event!(sessionIdle("s-off"))
+  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
+
+  expect(sent).toEqual([])
+})
+
+test("watchdog respects mode off", async () => {
+  const sent: Array<{ sessionID: string; text: string }> = []
+  let currentMode: "off" | "on" | "aggressive" = "on"
+
+  const hooks = await createOpencodeYoloHooks(makeDeps({
+    readMode: async () => currentMode,
+    writeMode: async (m: "off" | "on" | "aggressive") => { currentMode = m },
+    loadMessageText: async () => "Should I continue?",
+    sendUserMessage: async (sessionID: string, text: string) => {
+      sent.push({ sessionID, text })
+    },
+  }))
+
+  // Assistant completes — stores pending reply
+  await hooks.event!(assistantCompleted("a-wdoff", "s-wdoff"))
+
+  // User turns yolo off
+  await hooks["command.execute.before"]!(
+    { command: "yolo", sessionID: "s-wdoff", arguments: "off" },
+    { parts: [] },
+  )
+
+  // Wait for watchdog stale threshold
+  await vi.advanceTimersByTimeAsync(WATCHDOG_STALE_MS + 100)
+
+  // Random event — watchdog should NOT deliver because mode is off
+  await hooks.event!({
+    event: {
+      type: "session.updated",
+      properties: { sessionID: "s-wdoff" },
+    },
+  })
+
+  expect(sent).toEqual([])
+})
