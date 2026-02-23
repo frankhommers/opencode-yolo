@@ -70,7 +70,7 @@ export function textFromParts(parts: Array<{ type?: string; text?: string }> = [
 }
 
 export const IDLE_DELAY_MS = 350
-export const WATCHDOG_STALE_MS = 2_000
+export const WATCHDOG_STALE_MS = 1_000
 export const HUMAN_TURN_TIMEOUT_MS = 10_000
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000
 
