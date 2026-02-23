@@ -424,8 +424,9 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
         return
       }
 
-      // session.idle: schedule delivery after IDLE_DELAY_MS (notifier pattern)
-      // This is the ONLY trigger for reply delivery — message.updated only stores the reply.
+      // session.idle: deliver pending reply immediately
+      // No setTimeout — timers are unreliable in this environment.
+      // session.idle already means OpenCode is fully idle and ready for input.
       if (event.type === "session.idle") {
         const sessionID = event.properties?.sessionID
         if (!sessionID) return
@@ -443,7 +444,8 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
           return
         }
 
-        scheduleReplyDelivery(sessionID)
+        yoloLog("session.idle: delivering reply NOW for", sessionID)
+        await deliverReply(sessionID)
         return
       }
 

@@ -67,7 +67,7 @@ test("/yolo on command enables mode", async () => {
   expect(writes).toEqual(["on"])
 })
 
-test("auto-reply sent after session.idle + delay", async () => {
+test("auto-reply sent on session.idle", async () => {
   const sent: Array<{ sessionID: string; text: string }> = []
 
   const hooks = await createOpencodeYoloHooks(makeDeps({
@@ -81,12 +81,8 @@ test("auto-reply sent after session.idle + delay", async () => {
   await hooks.event!(assistantCompleted("a-1", "s-2"))
   expect(sent).toEqual([])
 
-  // session.idle triggers the delivery timer
+  // session.idle delivers immediately
   await hooks.event!(sessionIdle("s-2"))
-  expect(sent).toEqual([]) // still waiting for delay
-
-  // After IDLE_DELAY_MS, reply is sent
-  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
   expect(sent).toEqual([{ sessionID: "s-2", text: DEFAULT_REPLY }])
 })
 
@@ -105,10 +101,9 @@ test("auto-reply waits for a human turn before sending again", async () => {
     },
   }))
 
-  // First assistant message → classify + idle + delay → sent
+  // First assistant message → classify + idle → sent
   await hooks.event!(assistantCompleted("a-1", "s-2"))
   await hooks.event!(sessionIdle("s-2"))
-  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
   expect(sent).toHaveLength(1)
 
   // Synthetic user message arrives (from our reply)
@@ -117,7 +112,6 @@ test("auto-reply waits for a human turn before sending again", async () => {
   // Second assistant message while waiting for human — should be classified but blocked
   await hooks.event!(assistantCompleted("a-2", "s-2"))
   await hooks.event!(sessionIdle("s-2"))
-  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
   expect(sent).toHaveLength(1) // still 1, blocked by waitingForHumanTurn
 
   // Real human takes over
@@ -132,7 +126,6 @@ test("auto-reply waits for a human turn before sending again", async () => {
   // Third assistant message after human took over — should work
   await hooks.event!(assistantCompleted("a-3", "s-2"))
   await hooks.event!(sessionIdle("s-2"))
-  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
 
   expect(sent).toEqual([
     { sessionID: "s-2", text: DEFAULT_REPLY },
@@ -152,7 +145,6 @@ test("sends proceed reply for proceed-style assistant statements", async () => {
 
   await hooks.event!(assistantCompleted("a-okgo", "s-okgo"))
   await hooks.event!(sessionIdle("s-okgo"))
-  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
 
   expect(sent).toEqual([{ sessionID: "s-okgo", text: PROCEED_REPLY }])
 })
@@ -304,7 +296,6 @@ test("aggressive mode asks continuation prompt for plain assistant updates", asy
 
   await hooks.event!(assistantCompleted("a-plain", "s-agg"))
   await hooks.event!(sessionIdle("s-agg"))
-  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
 
   expect(sent).toEqual([{ sessionID: "s-agg", text: "What can we do now to reach the final result in the best way possible?" }])
 })
@@ -334,7 +325,6 @@ test("human typing before session.idle cancels pending reply", async () => {
 
   // Idle now fires, but pending reply was cancelled by human
   await hooks.event!(sessionIdle("s-cancel"))
-  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
 
   expect(sent).toEqual([])
 })
@@ -375,12 +365,11 @@ test("idle-before-message.updated: reply waits for next idle", async () => {
 
   // Next idle triggers delivery
   await hooks.event!(sessionIdle("s-self"))
-  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
 
   expect(sent).toEqual([{ sessionID: "s-self", text: DEFAULT_REPLY }])
 })
 
-test("session.status busy cancels pending reply timer", async () => {
+test("session.status busy before idle cancels pending reply", async () => {
   const sent: Array<{ sessionID: string; text: string }> = []
 
   const hooks = await createOpencodeYoloHooks(makeDeps({
@@ -392,10 +381,8 @@ test("session.status busy cancels pending reply timer", async () => {
 
   // Assistant completes, stores pending reply
   await hooks.event!(assistantCompleted("a-busy", "s-busy"))
-  // Idle fires, starts delivery timer
-  await hooks.event!(sessionIdle("s-busy"))
 
-  // Session goes busy before timer fires — cancels the pending reply
+  // Session goes busy before idle — cancels the pending reply
   await hooks.event!({
     event: {
       type: "session.status",
@@ -403,8 +390,8 @@ test("session.status busy cancels pending reply timer", async () => {
     },
   })
 
-  // Timer fires, but reply was cancelled
-  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
+  // Idle fires, but reply was already cancelled by busy
+  await hooks.event!(sessionIdle("s-busy"))
   expect(sent).toEqual([])
 })
 
@@ -431,7 +418,6 @@ test("session.error suppresses idle delivery", async () => {
 
   // Idle fires, but error suppression blocks delivery
   await hooks.event!(sessionIdle("s-err"))
-  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
 
   expect(sent).toEqual([])
 })
@@ -452,17 +438,15 @@ test("guard recovers after promptAsync delivery fails silently", async () => {
     },
   }))
 
-  // First cycle: classify + idle + delay → sends reply
+  // First cycle: classify + idle → sends reply
   await hooks.event!(assistantCompleted("a-first", "s-recover"))
   await hooks.event!(sessionIdle("s-recover"))
-  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
   expect(sent).toHaveLength(1)
 
   // No user message event arrives (promptAsync failed silently)
   // Second assistant message arrives — blocked by waitingForHumanTurn
   await hooks.event!(assistantCompleted("a-second", "s-recover"))
   await hooks.event!(sessionIdle("s-recover"))
-  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
   expect(sent).toHaveLength(1) // still blocked
 
   // After HUMAN_TURN_TIMEOUT_MS, guard auto-clears
@@ -471,9 +455,8 @@ test("guard recovers after promptAsync delivery fails silently", async () => {
   // Now a new assistant message should work again
   await hooks.event!(assistantCompleted("a-third", "s-recover"))
 
-  // session.idle triggers send after delay
+  // session.idle triggers delivery immediately
   await hooks.event!(sessionIdle("s-recover"))
-  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS + 100)
 
   expect(sent).toHaveLength(2)
   expect(sent[1]).toEqual({ sessionID: "s-recover", text: DEFAULT_REPLY })
@@ -562,9 +545,8 @@ test("/yolo start sends prompt after idle without changing mode", async () => {
   expect(sent).toEqual([])
   expect(output.parts[0].text).toBe("YOLO: kicking off work.")
 
-  // session.idle + delay triggers delivery
+  // session.idle triggers delivery immediately
   await hooks.event!(sessionIdle("s-start"))
-  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
 
   expect(sent).toEqual([{ sessionID: "s-start", text: AGGRESSIVE_FALLBACK }])
 })
@@ -660,10 +642,9 @@ test("watchdog respects waitingForHumanTurn guard", async () => {
     },
   }))
 
-  // First cycle: idle + delay delivers normally
+  // First cycle: idle delivers immediately
   await hooks.event!(assistantCompleted("a-wd3a", "s-wd3"))
   await hooks.event!(sessionIdle("s-wd3"))
-  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
   expect(sent).toHaveLength(1)
 
   // Synthetic user message arrives (from our reply) — sets waitingForHumanTurn
@@ -709,9 +690,8 @@ test("delivery aborted when mode switched to off before idle fires", async () =>
     { parts: [] },
   )
 
-  // Now idle fires + timer — should NOT deliver because mode is off
+  // Now idle fires — should NOT deliver because mode is off
   await hooks.event!(sessionIdle("s-off"))
-  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
 
   expect(sent).toEqual([])
 })
