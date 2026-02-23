@@ -1,4 +1,4 @@
-import { createOpencodeYoloHooks, IDLE_DELAY_MS, HUMAN_TURN_TIMEOUT_MS, type RuntimeDeps } from "./opencodeCore"
+import { createOpencodeYoloHooks, IDLE_DELAY_MS, WATCHDOG_STALE_MS, HUMAN_TURN_TIMEOUT_MS, type RuntimeDeps } from "./opencodeCore"
 import { DEFAULT_REPLY, PROCEED_REPLY, AGGRESSIVE_FALLBACK } from "./isQuestion"
 
 function makeDeps(overrides: Partial<RuntimeDeps> = {}): RuntimeDeps {
@@ -589,4 +589,99 @@ test("/yolo start does nothing when mode is off", async () => {
 
   expect(sent).toEqual([])
   expect(output.parts[0].text).toContain("off")
+})
+
+test("watchdog delivers stale pending reply when timer fails to fire", async () => {
+  const sent: Array<{ sessionID: string; text: string }> = []
+
+  const hooks = await createOpencodeYoloHooks(makeDeps({
+    loadMessageText: async () => "Should I continue?",
+    sendUserMessage: async (sessionID: string, text: string) => {
+      sent.push({ sessionID, text })
+    },
+  }))
+
+  // Assistant completes — stores pending reply
+  await hooks.event!(assistantCompleted("a-wd", "s-wd"))
+  expect(sent).toEqual([])
+
+  // No session.idle fires. Simulate time passing.
+  await vi.advanceTimersByTimeAsync(WATCHDOG_STALE_MS + 100)
+
+  // A random event arrives — watchdog should detect the stale reply and deliver
+  await hooks.event!({
+    event: {
+      type: "session.updated",
+      properties: { sessionID: "s-wd" },
+    },
+  })
+
+  expect(sent).toEqual([{ sessionID: "s-wd", text: DEFAULT_REPLY }])
+})
+
+test("watchdog does not deliver if reply is not yet stale", async () => {
+  const sent: Array<{ sessionID: string; text: string }> = []
+
+  const hooks = await createOpencodeYoloHooks(makeDeps({
+    loadMessageText: async () => "Should I continue?",
+    sendUserMessage: async (sessionID: string, text: string) => {
+      sent.push({ sessionID, text })
+    },
+  }))
+
+  // Assistant completes — stores pending reply
+  await hooks.event!(assistantCompleted("a-wd2", "s-wd2"))
+
+  // Only advance a little — not yet stale
+  await vi.advanceTimersByTimeAsync(WATCHDOG_STALE_MS - 500)
+
+  // Random event — watchdog should NOT deliver yet
+  await hooks.event!({
+    event: {
+      type: "session.updated",
+      properties: { sessionID: "s-wd2" },
+    },
+  })
+
+  expect(sent).toEqual([])
+})
+
+test("watchdog respects waitingForHumanTurn guard", async () => {
+  const sent: Array<{ sessionID: string; text: string }> = []
+
+  const hooks = await createOpencodeYoloHooks(makeDeps({
+    loadMessageText: async (_sid: string, mid: string) => {
+      if (mid === "a-wd3a") return "Should I continue?"
+      if (mid === "a-wd3b") return "What next?"
+      return ""
+    },
+    sendUserMessage: async (sessionID: string, text: string) => {
+      sent.push({ sessionID, text })
+    },
+  }))
+
+  // First cycle: idle + delay delivers normally
+  await hooks.event!(assistantCompleted("a-wd3a", "s-wd3"))
+  await hooks.event!(sessionIdle("s-wd3"))
+  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
+  expect(sent).toHaveLength(1)
+
+  // Synthetic user message arrives (from our reply) — sets waitingForHumanTurn
+  await hooks.event!(userMessageUpdated("u-synth-wd", "s-wd3"))
+
+  // Second assistant message while waiting for human
+  await hooks.event!(assistantCompleted("a-wd3b", "s-wd3"))
+
+  // Wait for watchdog to consider it stale
+  await vi.advanceTimersByTimeAsync(WATCHDOG_STALE_MS + 100)
+
+  // Random event — watchdog should NOT deliver because waitingForHumanTurn
+  await hooks.event!({
+    event: {
+      type: "session.updated",
+      properties: { sessionID: "s-wd3" },
+    },
+  })
+
+  expect(sent).toHaveLength(1) // still only the first reply
 })

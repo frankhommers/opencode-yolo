@@ -70,6 +70,7 @@ export function textFromParts(parts: Array<{ type?: string; text?: string }> = [
 }
 
 export const IDLE_DELAY_MS = 350
+export const WATCHDOG_STALE_MS = 2_000
 export const HUMAN_TURN_TIMEOUT_MS = 10_000
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000
 
@@ -92,8 +93,9 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
   const pendingSyntheticUserBySession = new Set<string>()
   const activeYoloCommandSessions = new Set<string>()
 
-  // --- Idle scheduling (notifier pattern) ---
+  // --- Idle scheduling (notifier pattern) + watchdog fallback ---
   const pendingReplies = new Map<string, string>()
+  const pendingReplySetAt = new Map<string, number>()
   const idleTimers = new Map<string, ReturnType<typeof setTimeout>>()
   const idleSequence = new Map<string, number>()
   const errorSuppressionAt = new Map<string, number>()
@@ -141,6 +143,7 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
 
   function cancelPendingReply(sessionID: string) {
     pendingReplies.delete(sessionID)
+    pendingReplySetAt.delete(sessionID)
     bumpSequence(sessionID)
     clearIdleTimer(sessionID)
   }
@@ -204,6 +207,7 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
     const pendingReply = pendingReplies.get(sessionID)
     if (!pendingReply) { yoloLog("DELIVER SKIP: no pendingReply", sessionID); return }
     pendingReplies.delete(sessionID)
+    pendingReplySetAt.delete(sessionID)
     if (shouldSuppressIdle(sessionID)) { yoloLog("DELIVER SKIP: error suppression", sessionID); return }
     if (waitingForHumanTurnBySession.has(sessionID)) { yoloLog("DELIVER SKIP: waitingForHumanTurn", sessionID); return }
 
@@ -218,6 +222,22 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
       yoloLog("SEND ERROR", sessionID, String(err))
       waitingForHumanTurnBySession.delete(sessionID)
       pendingSyntheticUserBySession.delete(sessionID)
+    }
+  }
+
+  function checkWatchdog() {
+    // Fallback: if setTimeout callbacks aren't firing, deliver stale pending replies
+    // directly from the event stream. Any incoming event triggers this check.
+    const now = Date.now()
+    for (const [sessionID, setAt] of pendingReplySetAt) {
+      if (now - setAt < WATCHDOG_STALE_MS) continue
+      if (!pendingReplies.has(sessionID)) { pendingReplySetAt.delete(sessionID); continue }
+      if (waitingForHumanTurnBySession.has(sessionID)) continue
+      if (shouldSuppressIdle(sessionID)) { cancelPendingReply(sessionID); continue }
+
+      yoloLog("WATCHDOG: stale reply detected for", sessionID, "age:", now - setAt, "ms — delivering now")
+      clearIdleTimer(sessionID)
+      void deliverReply(sessionID)
     }
   }
 
@@ -260,6 +280,7 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
         }
         yoloLog("command /yolo start: queuing prompt for", input.sessionID)
         pendingReplies.set(input.sessionID, AGGRESSIVE_FALLBACK)
+        pendingReplySetAt.set(input.sessionID, Date.now())
         // Delivery will happen when session.idle fires after this command completes
         output.parts = [{ type: "text", text: "YOLO: kicking off work." }]
         return
@@ -350,6 +371,9 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
     },
 
     event: async ({ event }: HookEvent) => {
+      // Watchdog: on every event, check for stale pending replies whose timers didn't fire
+      checkWatchdog()
+
       yoloLog("event:", event.type, JSON.stringify(event.properties?.sessionID ?? event.properties?.info?.sessionID ?? "no-sid"))
 
       if (event.type === "command.executed") {
@@ -448,7 +472,10 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
 
       // Store pending reply — delivery is triggered by session.idle (notifier pattern).
       // We do NOT deliver here; we wait for OpenCode to fully go idle first.
+      // Watchdog fallback: if the timer doesn't fire within WATCHDOG_STALE_MS,
+      // the next incoming event will deliver it directly.
       pendingReplies.set(info.sessionID, reply)
+      pendingReplySetAt.set(info.sessionID, Date.now())
       yoloLog("pendingReply SET for", info.sessionID, "(waiting for session.idle)")
     },
   }
