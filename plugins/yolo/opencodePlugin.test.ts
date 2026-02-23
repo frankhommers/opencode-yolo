@@ -341,7 +341,7 @@ test("reply NOT sent without session.idle", async () => {
 
   // Only message.updated, no session.idle — reply should NOT be sent
   await hooks.event!(assistantCompleted("a-noidle", "s-noidle"))
-  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS * 10)
+  vi.advanceTimersByTime(IDLE_DELAY_MS * 10)
 
   expect(sent).toEqual([])
 })
@@ -450,7 +450,7 @@ test("guard recovers after promptAsync delivery fails silently", async () => {
   expect(sent).toHaveLength(1) // still blocked
 
   // After HUMAN_TURN_TIMEOUT_MS, guard auto-clears
-  await vi.advanceTimersByTimeAsync(HUMAN_TURN_TIMEOUT_MS)
+  vi.advanceTimersByTime(HUMAN_TURN_TIMEOUT_MS)
 
   // Now a new assistant message should work again
   await hooks.event!(assistantCompleted("a-third", "s-recover"))
@@ -567,7 +567,7 @@ test("/yolo start does nothing when mode is off", async () => {
     output,
   )
 
-  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS * 5)
+  vi.advanceTimersByTime(IDLE_DELAY_MS * 5)
 
   expect(sent).toEqual([])
   expect(output.parts[0].text).toContain("off")
@@ -588,7 +588,7 @@ test("watchdog delivers stale pending reply when timer fails to fire", async () 
   expect(sent).toEqual([])
 
   // No session.idle fires. Simulate time passing.
-  await vi.advanceTimersByTimeAsync(WATCHDOG_STALE_MS + 100)
+  vi.advanceTimersByTime(WATCHDOG_STALE_MS + 100)
 
   // A random event arrives — watchdog should detect the stale reply and deliver
   await hooks.event!({
@@ -615,7 +615,7 @@ test("watchdog does not deliver if reply is not yet stale", async () => {
   await hooks.event!(assistantCompleted("a-wd2", "s-wd2"))
 
   // Only advance a little — not yet stale
-  await vi.advanceTimersByTimeAsync(WATCHDOG_STALE_MS - 500)
+  vi.advanceTimersByTime(WATCHDOG_STALE_MS - 500)
 
   // Random event — watchdog should NOT deliver yet
   await hooks.event!({
@@ -654,7 +654,7 @@ test("watchdog respects waitingForHumanTurn guard", async () => {
   await hooks.event!(assistantCompleted("a-wd3b", "s-wd3"))
 
   // Wait for watchdog to consider it stale
-  await vi.advanceTimersByTimeAsync(WATCHDOG_STALE_MS + 100)
+  vi.advanceTimersByTime(WATCHDOG_STALE_MS + 100)
 
   // Random event — watchdog should NOT deliver because waitingForHumanTurn
   await hooks.event!({
@@ -719,7 +719,7 @@ test("watchdog respects mode off", async () => {
   )
 
   // Wait for watchdog stale threshold
-  await vi.advanceTimersByTimeAsync(WATCHDOG_STALE_MS + 100)
+  vi.advanceTimersByTime(WATCHDOG_STALE_MS + 100)
 
   // Random event — watchdog should NOT deliver because mode is off
   await hooks.event!({
