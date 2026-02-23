@@ -69,7 +69,7 @@ export function textFromParts(parts: Array<{ type?: string; text?: string }> = [
     .join("\n")
 }
 
-export const IDLE_DELAY_MS = 1000
+export const IDLE_DELAY_MS = 350
 export const HUMAN_TURN_TIMEOUT_MS = 10_000
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000
 
@@ -146,6 +146,7 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
   }
 
   function markBusy(sessionID: string) {
+    yoloLog("markBusy", sessionID)
     lastBusyAt.set(sessionID, Date.now())
     errorSuppressionAt.delete(sessionID)
     cancelPendingReply(sessionID)
@@ -199,26 +200,43 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
     }
   }
 
-  function scheduleReplyDelivery(sessionID: string) {
-    clearIdleTimer(sessionID)
-    const sequence = bumpSequence(sessionID)
-    yoloLog("scheduling reply delivery for", sessionID)
-    const timer = setTimeout(async () => {
-      idleTimers.delete(sessionID)
-      if (!hasCurrentSequence(sessionID, sequence)) return
-      const pendingReply = pendingReplies.get(sessionID)
-      if (!pendingReply) return
-      pendingReplies.delete(sessionID)
-      if (shouldSuppressIdle(sessionID)) return
-      if (waitingForHumanTurnBySession.has(sessionID)) return
+  async function deliverReply(sessionID: string) {
+    const pendingReply = pendingReplies.get(sessionID)
+    if (!pendingReply) { yoloLog("DELIVER SKIP: no pendingReply", sessionID); return }
+    pendingReplies.delete(sessionID)
+    if (shouldSuppressIdle(sessionID)) { yoloLog("DELIVER SKIP: error suppression", sessionID); return }
+    if (waitingForHumanTurnBySession.has(sessionID)) { yoloLog("DELIVER SKIP: waitingForHumanTurn", sessionID); return }
 
+    try {
       yoloLog("SENDING reply to", sessionID, pendingReply.substring(0, 40) + "...")
       waitingForHumanTurnBySession.add(sessionID)
       pendingSyntheticUserBySession.add(sessionID)
       startHumanTurnTimeout(sessionID)
       await deps.sendUserMessage(sessionID, pendingReply)
       yoloLog("SENT reply to", sessionID)
+    } catch (err) {
+      yoloLog("SEND ERROR", sessionID, String(err))
+      waitingForHumanTurnBySession.delete(sessionID)
+      pendingSyntheticUserBySession.delete(sessionID)
+    }
+  }
+
+  function scheduleReplyDelivery(sessionID: string) {
+    // Notifier pattern: wait IDLE_DELAY_MS after session.idle before delivering.
+    // This ensures OpenCode has fully transitioned to idle before we send a new message.
+    clearIdleTimer(sessionID)
+    const seq = bumpSequence(sessionID)
+    yoloLog("scheduleReplyDelivery: scheduling timer for", sessionID, "seq:", seq)
+
+    const timer = setTimeout(() => {
+      idleTimers.delete(sessionID)
+      if (!hasCurrentSequence(sessionID, seq)) {
+        yoloLog("DELIVER SKIP: sequence mismatch", sessionID, "expected:", seq, "current:", idleSequence.get(sessionID))
+        return
+      }
+      void deliverReply(sessionID)
     }, IDLE_DELAY_MS)
+
     idleTimers.set(sessionID, timer)
   }
 
@@ -240,9 +258,9 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
           output.parts = [{ type: "text", text: "YOLO mode is off. Enable it first with /yolo on or /yolo aggressive." }]
           return
         }
-        yoloLog("command /yolo start: sending prompt to", input.sessionID)
+        yoloLog("command /yolo start: queuing prompt for", input.sessionID)
         pendingReplies.set(input.sessionID, AGGRESSIVE_FALLBACK)
-        scheduleReplyDelivery(input.sessionID)
+        // Delivery will happen when session.idle fires after this command completes
         output.parts = [{ type: "text", text: "YOLO: kicking off work." }]
         return
       }
@@ -381,7 +399,8 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
         return
       }
 
-      // session.idle: send pending reply after delay (with sequence guard)
+      // session.idle: schedule delivery after IDLE_DELAY_MS (notifier pattern)
+      // This is the ONLY trigger for reply delivery — message.updated only stores the reply.
       if (event.type === "session.idle") {
         const sessionID = event.properties?.sessionID
         if (!sessionID) return
@@ -427,18 +446,10 @@ export async function createOpencodeYoloHooks(deps: RuntimeDeps) {
       yoloLog("message.updated classified:", info.id, "reply:", reply ? reply.substring(0, 40) + "..." : "NONE", "mode:", mode)
       if (!reply) return
 
-      // Store pending reply — will be sent on session.idle after delay
+      // Store pending reply — delivery is triggered by session.idle (notifier pattern).
+      // We do NOT deliver here; we wait for OpenCode to fully go idle first.
       pendingReplies.set(info.sessionID, reply)
-      yoloLog("pendingReply SET for", info.sessionID)
-
-      // Schedule delivery if no timer is already pending. This handles two cases:
-      // 1. session.idle fired before message.updated (same tick, idle first)
-      // 2. No session.idle at all (LLM completed without idle gap, e.g. tool calls)
-      // The guards inside the timer callback (sequence, busy, error, waitingForHuman)
-      // protect against premature delivery.
-      if (!idleTimers.has(info.sessionID)) {
-        scheduleReplyDelivery(info.sessionID)
-      }
+      yoloLog("pendingReply SET for", info.sessionID, "(waiting for session.idle)")
     },
   }
 }

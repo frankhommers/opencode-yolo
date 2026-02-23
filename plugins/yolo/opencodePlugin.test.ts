@@ -77,17 +77,16 @@ test("auto-reply sent after session.idle + delay", async () => {
     },
   }))
 
-  // Assistant completes — classifies reply but does NOT send yet
+  // Assistant completes — classifies and stores pending reply (does NOT send yet)
   await hooks.event!(assistantCompleted("a-1", "s-2"))
   expect(sent).toEqual([])
 
-  // Session goes idle — starts 1s timer
+  // session.idle triggers the delivery timer
   await hooks.event!(sessionIdle("s-2"))
-  expect(sent).toEqual([])
+  expect(sent).toEqual([]) // still waiting for delay
 
-  // Advance past delay
+  // After IDLE_DELAY_MS, reply is sent
   await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
-
   expect(sent).toEqual([{ sessionID: "s-2", text: DEFAULT_REPLY }])
 })
 
@@ -141,7 +140,7 @@ test("auto-reply waits for a human turn before sending again", async () => {
   ])
 })
 
-test("sends OK Go for proceed-style assistant statements", async () => {
+test("sends proceed reply for proceed-style assistant statements", async () => {
   const sent: Array<{ sessionID: string; text: string }> = []
 
   const hooks = await createOpencodeYoloHooks(makeDeps({
@@ -310,7 +309,7 @@ test("aggressive mode asks continuation prompt for plain assistant updates", asy
   expect(sent).toEqual([{ sessionID: "s-agg", text: "What can we do now to reach the final result in the best way possible?" }])
 })
 
-test("human typing during delay cancels pending reply", async () => {
+test("human typing before session.idle cancels pending reply", async () => {
   const sent: Array<{ sessionID: string; text: string }> = []
 
   const hooks = await createOpencodeYoloHooks(makeDeps({
@@ -320,11 +319,11 @@ test("human typing during delay cancels pending reply", async () => {
     },
   }))
 
-  // Assistant completes + session idle starts timer
+  // Assistant completes — stores pending reply
   await hooks.event!(assistantCompleted("a-cancel", "s-cancel"))
-  await hooks.event!(sessionIdle("s-cancel"))
+  expect(sent).toEqual([])
 
-  // Human types before delay expires
+  // Human types before session turns idle — cancels pending reply
   await hooks["chat.message"]!(
     { sessionID: "s-cancel" },
     {
@@ -333,13 +332,14 @@ test("human typing during delay cancels pending reply", async () => {
     },
   )
 
-  // Timer fires but reply should be cancelled
+  // Idle now fires, but pending reply was cancelled by human
+  await hooks.event!(sessionIdle("s-cancel"))
   await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
 
   expect(sent).toEqual([])
 })
 
-test("reply sent even without session.idle (self-scheduled)", async () => {
+test("reply NOT sent without session.idle", async () => {
   const sent: Array<{ sessionID: string; text: string }> = []
 
   const hooks = await createOpencodeYoloHooks(makeDeps({
@@ -349,14 +349,14 @@ test("reply sent even without session.idle (self-scheduled)", async () => {
     },
   }))
 
-  // Only message.updated, no session.idle — reply should still be sent
+  // Only message.updated, no session.idle — reply should NOT be sent
   await hooks.event!(assistantCompleted("a-noidle", "s-noidle"))
-  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
+  await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS * 10)
 
-  expect(sent).toEqual([{ sessionID: "s-noidle", text: DEFAULT_REPLY }])
+  expect(sent).toEqual([])
 })
 
-test("self-schedules reply when session.idle fires before message.updated", async () => {
+test("idle-before-message.updated: reply waits for next idle", async () => {
   const sent: Array<{ sessionID: string; text: string }> = []
 
   const hooks = await createOpencodeYoloHooks(makeDeps({
@@ -370,13 +370,17 @@ test("self-schedules reply when session.idle fires before message.updated", asyn
   await hooks.event!(sessionIdle("s-self"))
   await hooks.event!(assistantCompleted("a-self", "s-self"))
 
-  // Self-timer should fire after IDLE_DELAY_MS
+  // Reply is stored but not sent (idle already passed)
+  expect(sent).toEqual([])
+
+  // Next idle triggers delivery
+  await hooks.event!(sessionIdle("s-self"))
   await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
 
   expect(sent).toEqual([{ sessionID: "s-self", text: DEFAULT_REPLY }])
 })
 
-test("session.status busy cancels pending reply", async () => {
+test("session.status busy cancels pending reply timer", async () => {
   const sent: Array<{ sessionID: string; text: string }> = []
 
   const hooks = await createOpencodeYoloHooks(makeDeps({
@@ -386,9 +390,12 @@ test("session.status busy cancels pending reply", async () => {
     },
   }))
 
+  // Assistant completes, stores pending reply
   await hooks.event!(assistantCompleted("a-busy", "s-busy"))
+  // Idle fires, starts delivery timer
+  await hooks.event!(sessionIdle("s-busy"))
 
-  // Session goes busy again before idle fires
+  // Session goes busy before timer fires — cancels the pending reply
   await hooks.event!({
     event: {
       type: "session.status",
@@ -396,14 +403,12 @@ test("session.status busy cancels pending reply", async () => {
     },
   })
 
-  // Now idle fires, but sequence was bumped by busy
-  await hooks.event!(sessionIdle("s-busy"))
+  // Timer fires, but reply was cancelled
   await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
-
   expect(sent).toEqual([])
 })
 
-test("session.error suppresses next idle reply", async () => {
+test("session.error suppresses idle delivery", async () => {
   const sent: Array<{ sessionID: string; text: string }> = []
 
   const hooks = await createOpencodeYoloHooks(makeDeps({
@@ -413,9 +418,10 @@ test("session.error suppresses next idle reply", async () => {
     },
   }))
 
+  // Assistant completes, stores pending reply
   await hooks.event!(assistantCompleted("a-err", "s-err"))
 
-  // Error occurs
+  // Error occurs — cancels pending reply
   await hooks.event!({
     event: {
       type: "session.error",
@@ -423,7 +429,7 @@ test("session.error suppresses next idle reply", async () => {
     },
   })
 
-  // Idle fires but should be suppressed due to error
+  // Idle fires, but error suppression blocks delivery
   await hooks.event!(sessionIdle("s-err"))
   await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
 
@@ -536,7 +542,7 @@ test("question.asked ignored when mode is off", async () => {
   expect(answered).toEqual([])
 })
 
-test("/yolo start sends prompt without changing mode", async () => {
+test("/yolo start sends prompt after idle without changing mode", async () => {
   const sent: Array<{ sessionID: string; text: string }> = []
 
   const hooks = await createOpencodeYoloHooks(makeDeps({
@@ -552,11 +558,15 @@ test("/yolo start sends prompt without changing mode", async () => {
     output,
   )
 
-  // Timer fires after IDLE_DELAY_MS
+  // Not sent yet — waiting for session.idle
+  expect(sent).toEqual([])
+  expect(output.parts[0].text).toBe("YOLO: kicking off work.")
+
+  // session.idle + delay triggers delivery
+  await hooks.event!(sessionIdle("s-start"))
   await vi.advanceTimersByTimeAsync(IDLE_DELAY_MS)
 
   expect(sent).toEqual([{ sessionID: "s-start", text: AGGRESSIVE_FALLBACK }])
-  expect(output.parts[0].text).toBe("YOLO: kicking off work.")
 })
 
 test("/yolo start does nothing when mode is off", async () => {
