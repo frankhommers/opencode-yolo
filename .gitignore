@@ -1,5 +1,28 @@
+# Dependencies
+node_modules/
+bun.lock
+package-lock.json
+
+# Build output
+dist/
+*.tgz
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Local config
 .worktrees/
 .opencode/
-node_modules/
-dist/
 .yolo.json
