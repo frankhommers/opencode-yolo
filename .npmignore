@@ -1,0 +1,27 @@
+# Development files
+node_modules/
+*.log
+.DS_Store
+tsconfig.json
+bun.lock
+package-lock.json
+vitest.config.ts
+
+# Source files (shipping dist/)
+*.ts
+!*.d.ts
+
+# Tests
+*.test.ts
+
+# Git & config
+.git/
+.gitignore
+.opencode/
+.worktrees/
+.yolo.json
+
+# Scripts & docs
+scripts/
+docs/
+commands/
