@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@frankhommers/opencode-yolo",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "OpenCode plugin that auto-replies to assistant messages so you don't have to manually confirm or approve",
   "main": "./dist/index.js",
