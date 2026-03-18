@@ -4,10 +4,6 @@ OpenCode plugin that auto-replies to assistant messages so you don't have to man
 
 ## Install
 
-```bash
-npm install @frankhommers/opencode-yolo
-```
-
 Add to your OpenCode config (`~/.config/opencode/opencode.json` for global, or `.opencode/opencode.json` for per-project):
 
 ```json
@@ -15,6 +11,10 @@ Add to your OpenCode config (`~/.config/opencode/opencode.json` for global, or `
   "plugin": ["@frankhommers/opencode-yolo"]
 }
 ```
+
+OpenCode installs the plugin automatically on next startup. Updates are picked up automatically too.
+
+To pin a specific version: `"@frankhommers/opencode-yolo@0.1.2"`
 
 Add the command definition to `~/.config/opencode/commands/yolo.md` (or `.opencode/commands/yolo.md`):
 
