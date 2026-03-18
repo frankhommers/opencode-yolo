@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION_FILE="$REPO_ROOT/plugins/yolo/version.ts"
+VERSION_FILE="$REPO_ROOT/version.ts"
 COMMAND_FILE="$REPO_ROOT/commands/yolo.md"
 COMMIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
 TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

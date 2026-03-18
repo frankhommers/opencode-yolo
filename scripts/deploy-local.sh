@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PLUGIN_DIR="$REPO_ROOT/plugins/yolo"
+PLUGIN_DIR="$REPO_ROOT"
 PLUGIN_REF="file://$PLUGIN_DIR"
 GLOBAL_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
 
