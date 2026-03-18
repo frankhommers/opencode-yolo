@@ -3,6 +3,6 @@ import { defineConfig } from "vitest/config"
 export default defineConfig({
   test: {
     globals: true,
-    exclude: ["**/.worktrees/**", "**/.opencode/**"],
+    exclude: ["**/node_modules/**", "**/.worktrees/**", "**/.opencode/**"],
   },
 })

@@ -1,12 +1,47 @@
 {
-  "name": "opencode-yolo",
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@frankhommers/opencode-yolo",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
+  "description": "OpenCode plugin that auto-replies to assistant messages so you don't have to manually confirm or approve",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "scripts": {
-    "test": "vitest run --passWithNoTests"
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc",
+    "prepublishOnly": "npm run build",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "plugin",
+    "yolo",
+    "auto-reply",
+    "auto-approve"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/frankhommers/opencode-yolo.git"
+  },
+  "bugs": {
+    "url": "https://github.com/frankhommers/opencode-yolo/issues"
+  },
+  "homepage": "https://github.com/frankhommers/opencode-yolo#readme",
+  "author": "Frank Hommers",
+  "license": "MIT",
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=0.13.7"
   },
   "devDependencies": {
+    "@opencode-ai/plugin": ">=0.13.7",
+    "@types/node": "^22.0.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   },
